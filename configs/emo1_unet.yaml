@@ -3,14 +3,14 @@ seed: 42
 
 data:
   spatial:
-    west: 11.0
-    east: 11.5
-    south: 46.0
-    north: 46.5
+    west: 10
+    east: 15
+    south: 42
+    north: 47
 
   temporal:
     start: "2018-01-01"
-    end: "2018-02-01"
+    end: "2020-12-31"
 
   bands:
     era5: ["t2m", "ssrd", "tp"]
@@ -32,13 +32,13 @@ data:
 
   split:
     train_years: [2018, 2018]  # inclusive
-    val_years:   [2018, 2018]
-    test_years:  [2018, 2018]
+    val_years:   [2019, 2019]
+    test_years:  [2020, 2020]
 
 model:
   name: "unet"
   params:
-    in_channels: 6          # adapt to your actual features
+    in_channels: 5          # adapt to your actual features
     out_channels: 1         # EMO1 ta24
     base_channels: 64
     num_down_blocks: 4
