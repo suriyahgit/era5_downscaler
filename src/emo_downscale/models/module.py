@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Any
 
 import torch
 from torch import nn
@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 
 class DownscaleLightningModule(pl.LightningModule):
-    def __init__(self, model: nn.Module, optimizer_cfg: Dict, scheduler_cfg: Dict):
+    def __init__(self, model: nn.Module, optimizer_cfg: Dict[str, Any], scheduler_cfg: Dict[str, Any]):
         super().__init__()
         self.model = model
         self.optimizer_cfg = optimizer_cfg
@@ -17,7 +17,8 @@ class DownscaleLightningModule(pl.LightningModule):
         return self.model(x)
 
     def _step(self, batch, stage: str):
-        x, y = batch  # x: (B, C_in, H, W), y: (B, C_out, H, W)
+        # x: (B, C_in, H, W), y: (B, C_out, H, W)
+        x, y = batch
         y_hat = self(x)
         loss = F.l1_loss(y_hat, y)
 
@@ -25,6 +26,7 @@ class DownscaleLightningModule(pl.LightningModule):
             mse = F.mse_loss(y_hat, y)
             rmse = torch.sqrt(mse)
 
+        # log on epoch (Lightning will aggregate over steps)
         self.log(f"{stage}_loss", loss, prog_bar=True, on_epoch=True, sync_dist=True)
         self.log(f"{stage}_rmse", rmse, prog_bar=True, on_epoch=True, sync_dist=True)
         return loss
@@ -39,9 +41,9 @@ class DownscaleLightningModule(pl.LightningModule):
         self._step(batch, "test")
 
     def configure_optimizers(self):
-        opt_name = self.optimizer_cfg.name
-        lr = self.optimizer_cfg.lr
-        wd = self.optimizer_cfg.weight_decay
+        opt_name = self.optimizer_cfg["name"]
+        lr = self.optimizer_cfg["lr"]
+        wd = self.optimizer_cfg.get("weight_decay", 0.0)
 
         if opt_name == "adamw":
             optimizer = torch.optim.AdamW(self.parameters(), lr=lr, weight_decay=wd)
@@ -50,7 +52,9 @@ class DownscaleLightningModule(pl.LightningModule):
         else:
             raise ValueError(f"Unknown optimizer {opt_name}")
 
-        if self.scheduler_cfg.name == "cosine":
+        sched_name = self.scheduler_cfg.get("name")
+
+        if sched_name == "cosine":
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer, T_max=self.trainer.max_epochs
             )
@@ -63,4 +67,5 @@ class DownscaleLightningModule(pl.LightningModule):
                 },
             }
 
+        # no scheduler
         return optimizer
