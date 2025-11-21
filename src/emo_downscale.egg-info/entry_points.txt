@@ -1,0 +1,2 @@
+[console_scripts]
+emo-downscale-train = emo_downscale.train:main

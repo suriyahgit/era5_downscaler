@@ -1,0 +1,83 @@
+run_name: "unet_emo1_alps"
+seed: 42
+
+data:
+  spatial:
+    west: 11.0
+    east: 11.5
+    south: 46.0
+    north: 46.5
+
+  temporal:
+    start: "2000-01-01"
+    end: "2019-12-31"
+
+  bands:
+    era5: ["t2m", "ssrd", "tp"]
+    pressure: ["t_850"]
+    dem: ["dem"]
+    emo1: ["ta24"]
+
+  stac_urls:
+    ERA5_T2M_SSRD_TP: "https://stac.intertwin.fedcloud.eu/collections/ERA5_T2M_SSRD_TP"
+    ERA5_PRESSURE: "https://stac.intertwin.fedcloud.eu/collections/ERA5_PRESSURE"
+    EMO1_DEM: "https://stac.intertwin.fedcloud.eu/collections/EMO1_DEM"
+    EMO1_TA24_PR_RG_PET_DAILY: "https://stac.intertwin.fedcloud.eu/collections/EMO1_TA24_PR_RG_PET_DAILY"
+
+  patch:
+    size_y: 128
+    size_x: 128
+    stride_y: 64
+    stride_x: 64
+
+  split:
+    train_years: [2000, 2013]  # inclusive
+    val_years:   [2014, 2016]
+    test_years:  [2017, 2019]
+
+model:
+  name: "unet"
+  params:
+    in_channels: 6          # adapt to your actual features
+    out_channels: 1         # EMO1 ta24
+    base_channels: 64
+    num_down_blocks: 4
+    convs_per_block: 2
+    norm: "group"
+    norm_groups: 8
+    activation: "relu"
+    dropout: 0.1
+    upsample_mode: "bilinear"
+    residual_output: true
+
+trainer:
+  max_epochs: 80
+  accelerator: "gpu"
+  devices: 1
+  precision: "16-mixed"
+  gradient_clip_val: 1.0
+  batch_size: 8
+  num_workers: 4
+
+  optimizer:
+    name: "adamw"
+    lr: 3e-4
+    weight_decay: 1e-5
+
+  scheduler:
+    name: "cosine"
+    warmup_epochs: 5
+
+  early_stopping:
+    monitor: "val_rmse"
+    patience: 10
+    mode: "min"
+
+  checkpoint:
+    monitor: "val_rmse"
+    mode: "min"
+
+mlflow:
+  tracking_uri: "file:./mlruns"
+  experiment_name: "emo1_alps_downscaling"
+  run_name_suffix: ""

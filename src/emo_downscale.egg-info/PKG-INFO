@@ -1,0 +1,68 @@
+Metadata-Version: 2.4
+Name: emo_downscale
+Version: 0.0.1
+Summary: ERA5 downscaling framework with openEO and PyTorch
+Author: Suriyah Dhinakaran
+License: GPL-3.0
+Requires-Python: <3.13,>=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+License-File: AUTHORS.md
+Requires-Dist: openeo-processes-dask[implementations]
+Requires-Dist: torch<3.0.0,>=2.2.0
+Requires-Dist: lightning<3.0.0,>=2.4.0
+Requires-Dist: mlflow<3.0.0,>=2.14.0
+Requires-Dist: pyyaml>=6.0.0
+Requires-Dist: python-dotenv>=1.0.0
+Requires-Dist: gdal<3.12,>=3.11
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=5.0.0; extra == "dev"
+Requires-Dist: ruff>=0.6.0; extra == "dev"
+Requires-Dist: black>=24.0.0; extra == "dev"
+Requires-Dist: mypy>=1.10.0; extra == "dev"
+Dynamic: license-file
+
+# Template for interTwin repositories
+
+This repository is to be used as a repository template for creating a new interTwin
+repository, and is aiming at being a clean basis promoting currently accepted
+good practices.
+
+It includes:
+
+- License information
+- Copyright and author information
+- Code of conduct and contribution guidelines
+- Templates for PR and issues
+- Code owners file for automatic assignment of PR reviewers
+- [GitHub actions](https://github.com/features/actions) workflows for linting
+  and checking links
+
+Content is based on:
+
+- [Contributor Covenant](http://contributor-covenant.org)
+- [Semantic Versioning](https://semver.org/)
+- [Chef Cookbook Contributing Guide](https://github.com/chef-cookbooks/community_cookbook_documentation/blob/master/CONTRIBUTING.MD)
+
+## GitHub repository management rules
+
+All changes should go through Pull Requests.
+
+### Merge management
+
+- Only squash should be enforced in the repository settings.
+- Update commit message for the squashed commits as needed.
+
+### Protection on main branch
+
+To be configured on the repository settings.
+
+- Require pull request reviews before merging
+  - Dismiss stale pull request approvals when new commits are pushed
+  - Require review from Code Owners
+- Require status checks to pass before merging
+  - GitHub actions if available
+  - Other checks as available and relevant
+  - Require branches to be up to date before merging
+- Include administrators

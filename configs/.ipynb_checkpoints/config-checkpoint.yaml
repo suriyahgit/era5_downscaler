@@ -1,0 +1,9 @@
+# top-level Hydra config
+defaults:
+  - data: alps_emo1
+  - model: unet
+  - trainer: default
+  - mlflow: default
+
+run_name: "unet_emo1_alps"
+seed: 42

@@ -1,0 +1,16 @@
+AUTHORS.md
+LICENSE
+README.md
+pyproject.toml
+src/emo_downscale/config.py
+src/emo_downscale/train.py
+src/emo_downscale.egg-info/PKG-INFO
+src/emo_downscale.egg-info/SOURCES.txt
+src/emo_downscale.egg-info/dependency_links.txt
+src/emo_downscale.egg-info/entry_points.txt
+src/emo_downscale.egg-info/requires.txt
+src/emo_downscale.egg-info/top_level.txt
+src/emo_downscale/data/datamodule.py
+src/emo_downscale/data/datasets.py
+src/emo_downscale/data/openeo_loader.py
+src/emo_downscale/models/registry.py

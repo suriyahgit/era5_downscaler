@@ -1,0 +1,50 @@
+[project]
+name = "emo_downscale"
+version = "0.0.1"
+description = "ERA5 downscaling framework with openEO and PyTorch"
+authors = [
+    { name = "Suriyah Dhinakaran" }
+]
+license = { text = "GPL-3.0" }
+readme = "README.md"
+
+# Better to give a range here; pin the exact Python version in your env file
+requires-python = ">=3.11,<3.13"
+
+dependencies = [
+    "openeo-processes-dask[implementations]",  # data loading & process-graphs
+
+    # Deep learning / training
+    "torch>=2.2.0,<3.0.0",
+    "lightning>=2.4.0,<3.0.0",
+
+    # Logging & configuration
+    "mlflow>=2.14.0,<3.0.0",
+    "pyyaml>=6.0.0",
+
+    # Misc utilities
+    "python-dotenv>=1.0.0",
+    "gdal>=3.11,<3.12"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.6.0",
+    "black>=24.0.0",
+    "mypy>=1.10.0"
+]
+
+[project.scripts]
+emo-downscale-train = "emo_downscale.train:main"
+
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
