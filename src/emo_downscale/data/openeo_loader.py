@@ -3,6 +3,9 @@ from typing import Dict, Tuple
 from openeo.local import LocalConnection
 from dask.distributed import LocalCluster, Client
 import xarray as xr
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 def build_local_cluster(n_workers: int = 8, threads_per_worker: int = 1) -> Client:
@@ -70,6 +73,6 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.Dataset, xr.Dataset]:
 
     # At this point predictors_cube & emo1 should share time/y/x grid
     #predictors_cube, emo1_aligned = xr.align(predictors_cube, emo1, join="inner")
-    print(predictors_cube)
-    print(emo1)
+    logger.info(f"Predictor cube shape: {predictors_cube.shape}")
+    logger.info(f"Target cube shape: {emo1.shape}")
     return predictors_cube, emo1

@@ -11,6 +11,11 @@ from emo_downscale.data.datamodule import DownscaleDataModule
 from emo_downscale.models.registry import create_model
 from emo_downscale.models.module import DownscaleLightningModule
 
+import logging
+
+
+
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ERA5 → EMO1 downscaling trainer")
@@ -25,8 +30,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    )
+    logger1 = logging.getLogger(__name__)
+    logger1.info("Loading configuration...")
     cfg: Dict[str, Any] = load_config(args.config)
-
+    logger1.info("Initializing MLflow logger...")
+    
     pl.seed_everything(cfg.get("seed", 42), workers=True)
 
     # ---- MLflow logger ----
@@ -75,6 +87,9 @@ def main() -> None:
         gradient_clip_val=trainer_cfg["gradient_clip_val"],
         log_every_n_steps=50,
     )
+
+    logger1.info("Model summary:")
+    logger1.info(str(backbone))
 
     trainer.fit(lit_model, datamodule=datamodule)
 

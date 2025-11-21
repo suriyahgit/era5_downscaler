@@ -9,7 +9,7 @@ data:
     north: 47
 
   temporal:
-    start: "2018-01-01"
+    start: "2016-01-01"
     end: "2020-12-31"
 
   bands:
@@ -31,7 +31,7 @@ data:
     stride_x: 64
 
   split:
-    train_years: [2018, 2018]  # inclusive
+    train_years: [2016, 2018]  # inclusive
     val_years:   [2019, 2019]
     test_years:  [2020, 2020]
 

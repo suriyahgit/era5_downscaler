@@ -1,50 +1,77 @@
-from typing import Tuple
-import numpy as np
+from typing import Tuple, List
 import torch
 from torch.utils.data import Dataset
+import xarray as xr
+import numpy as np
 
 
-def extract_patches(
-    arr: np.ndarray,
-    patch_size_y: int,
-    patch_size_x: int,
-    stride_y: int,
-    stride_x: int,
-) -> np.ndarray:
+class LazyPatchDataset(Dataset):
     """
-    arr: (T, C, Y, X)
-    returns: (N_patches, C, patch_y, patch_x)
+    Dataset that:
+      - keeps predictors/targets as xarray DataArray (dask-backed)
+      - stores only (time, y0, x0) indices
+      - extracts and computes ONE patch per __getitem__
     """
-    T, C, Y, X = arr.shape
-    patches = []
-    for t in range(T):
-        for y in range(0, Y - patch_size_y + 1, stride_y):
-            for x in range(0, X - patch_size_x + 1, stride_x):
-                patch = arr[t, :, y : y + patch_size_y, x : x + patch_size_x]
-                patches.append(patch)
-    if not patches:
-        raise ValueError("No patches extracted — check patch size/stride vs domain size.")
-    return np.stack(patches, axis=0)
 
-
-class PatchDataset(Dataset):
     def __init__(
         self,
-        predictors: np.ndarray,  # (T, Cx, Y, X)
-        targets: np.ndarray,     # (T, Cy, Y, X)
+        preds_da: xr.DataArray,   # (time, C, lat, lon)
+        targs_da: xr.DataArray,   # (time, C_out, lat, lon)
         patch_size: Tuple[int, int],
         stride: Tuple[int, int],
+        dtype: str = "float32",
     ):
-        patch_y, patch_x = patch_size
-        stride_y, stride_x = stride
+        assert preds_da.dims == ("time", "bands", "lat", "lon")
+        assert targs_da.dims == ("time", "bands", "lat", "lon")
 
-        self.X = extract_patches(predictors, patch_y, patch_x, stride_y, stride_x)
-        self.Y = extract_patches(targets, patch_y, patch_x, stride_y, stride_x)
+        self.preds_da = preds_da
+        self.targs_da = targs_da
+        self.patch_size = patch_size
+        self.stride = stride
+        self.dtype = dtype
+
+        T, C, Y, X = preds_da.shape
+        ph, pw = patch_size
+        sy, sx = stride
+
+        indices: List[Tuple[int, int, int]] = []
+        for t in range(T):
+            for y0 in range(0, Y - ph + 1, sy):
+                for x0 in range(0, X - pw + 1, sx):
+                    indices.append((t, y0, x0))
+
+        if not indices:
+            raise ValueError("No patches extracted — check patch size/stride vs domain size.")
+
+        self.indices = indices
 
     def __len__(self) -> int:
-        return self.X.shape[0]
+        return len(self.indices)
 
     def __getitem__(self, idx: int):
-        x = torch.from_numpy(self.X[idx]).float()
-        y = torch.from_numpy(self.Y[idx]).float()
+        t, y0, x0 = self.indices[idx]
+        ph, pw = self.patch_size
+
+        # Slice ONE patch lazily; dask computes only this piece
+        pred_patch = (
+            self.preds_da.isel(
+                time=t,
+                lat=slice(y0, y0 + ph),
+                lon=slice(x0, x0 + pw),
+            )
+            .values.astype(self.dtype)  # triggers compute for this patch only
+        )
+
+        targ_patch = (
+            self.targs_da.isel(
+                time=t,
+                lat=slice(y0, y0 + ph),
+                lon=slice(x0, x0 + pw),
+            )
+            .values.astype(self.dtype)
+        )
+
+        # shape: (C, ph, pw)
+        x = torch.from_numpy(pred_patch)
+        y = torch.from_numpy(targ_patch)
         return x, y

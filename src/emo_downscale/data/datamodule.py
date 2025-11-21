@@ -5,7 +5,9 @@ import lightning.pytorch as pl
 from torch.utils.data import DataLoader
 
 from emo_downscale.data.openeo_loader import load_era5_emo1_cubes
-from emo_downscale.data.datasets import PatchDataset
+from emo_downscale.data.datasets import LazyPatchDataset
+import logging
+logger1 = logging.getLogger(__name__)
 
 
 class DownscaleDataModule(pl.LightningDataModule):
@@ -25,29 +27,33 @@ class DownscaleDataModule(pl.LightningDataModule):
 
         # 1. load xarray cubes via openeo-processes-dask
         predictors_ds, target_ds = load_era5_emo1_cubes(data_cfg)
+        logger1.info("Dask Graph Computed Successfully!")
 
-        # standardize to (time, C, Y, X)
-        preds = predictors_ds.transpose("time", "bands", "lon", "lat").values
-        targs = target_ds.transpose("time", "bands", "lon", "lat").values
-
+        # standardize to DataArray: (time, C, Y, X)
+        preds_da = predictors_ds.transpose("time", "bands", "lat", "lon")
+        targs_da = target_ds.transpose("time", "bands", "lat", "lon")
+    
         years = predictors_ds["time"].dt.year.values
         split = data_cfg["split"]
-
+    
         train_mask = (years >= split["train_years"][0]) & (years <= split["train_years"][1])
-        val_mask = (years >= split["val_years"][0]) & (years <= split["val_years"][1])
-        test_mask = (years >= split["test_years"][0]) & (years <= split["test_years"][1])
-
-        train_preds, train_targs = preds[train_mask], targs[train_mask]
-        val_preds, val_targs = preds[val_mask], targs[val_mask]
-        test_preds, test_targs = preds[test_mask], targs[test_mask]
-
+        val_mask   = (years >= split["val_years"][0])   & (years <= split["val_years"][1])
+        test_mask  = (years >= split["test_years"][0])  & (years <= split["test_years"][1])
+    
+        train_preds_da = preds_da.isel(time=train_mask)
+        train_targs_da = targs_da.isel(time=train_mask)
+        val_preds_da   = preds_da.isel(time=val_mask)
+        val_targs_da   = targs_da.isel(time=val_mask)
+        test_preds_da  = preds_da.isel(time=test_mask)
+        test_targs_da  = targs_da.isel(time=test_mask)
+    
         patch_cfg = data_cfg["patch"]
         patch_size = (patch_cfg["size_y"], patch_cfg["size_x"])
-        stride = (patch_cfg["stride_y"], patch_cfg["stride_x"])
-
-        self._train_ds = PatchDataset(train_preds, train_targs, patch_size, stride)
-        self._val_ds   = PatchDataset(val_preds, val_targs, patch_size, stride)
-        self._test_ds  = PatchDataset(test_preds, test_targs, patch_size, stride)
+        stride     = (patch_cfg["stride_y"], patch_cfg["stride_x"])
+    
+        self._train_ds = LazyPatchDataset(train_preds_da, train_targs_da, patch_size, stride)
+        self._val_ds   = LazyPatchDataset(val_preds_da,   val_targs_da,   patch_size, stride)
+        self._test_ds  = LazyPatchDataset(test_preds_da,  test_targs_da,  patch_size, stride)
 
     def train_dataloader(self):
         return DataLoader(
