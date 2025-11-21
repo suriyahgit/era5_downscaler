@@ -65,7 +65,11 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.Dataset, xr.Dataset]:
     remap = era5_cube.resample_cube_spatial(dem, method="bilinear")
     dem_expanded = dem.resample_cube_temporal(remap)
     predictors_cube = remap.merge_cubes(dem_expanded)
+    predictors_cube = predictors_cube.execute()
+    emo1 = emo1.execute()
 
     # At this point predictors_cube & emo1 should share time/y/x grid
-    predictors_cube, emo1_aligned = xr.align(predictors_cube, emo1, join="inner")
-    return predictors_cube, emo1_aligned
+    #predictors_cube, emo1_aligned = xr.align(predictors_cube, emo1, join="inner")
+    print(predictors_cube)
+    print(emo1)
+    return predictors_cube, emo1

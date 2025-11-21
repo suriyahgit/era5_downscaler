@@ -9,8 +9,8 @@ data:
     north: 46.5
 
   temporal:
-    start: "2000-01-01"
-    end: "2019-12-31"
+    start: "2018-01-01"
+    end: "2018-02-01"
 
   bands:
     era5: ["t2m", "ssrd", "tp"]
@@ -31,9 +31,9 @@ data:
     stride_x: 64
 
   split:
-    train_years: [2000, 2013]  # inclusive
-    val_years:   [2014, 2016]
-    test_years:  [2017, 2019]
+    train_years: [2018, 2018]  # inclusive
+    val_years:   [2018, 2018]
+    test_years:  [2018, 2018]
 
 model:
   name: "unet"

@@ -27,8 +27,8 @@ class DownscaleDataModule(pl.LightningDataModule):
         predictors_ds, target_ds = load_era5_emo1_cubes(data_cfg)
 
         # standardize to (time, C, Y, X)
-        preds = predictors_ds.to_array().transpose("time", "variable", "y", "x").values
-        targs = target_ds.to_array().transpose("time", "variable", "y", "x").values
+        preds = predictors_ds.transpose("time", "bands", "lon", "lat").values
+        targs = target_ds.transpose("time", "bands", "lon", "lat").values
 
         years = predictors_ds["time"].dt.year.values
         split = data_cfg["split"]
