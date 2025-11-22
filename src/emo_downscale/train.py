@@ -13,6 +13,8 @@ from emo_downscale.models.registry import create_model
 from emo_downscale.models.module import DownscaleLightningModule
 from emo_downscale.logging_utils import setup_global_logger, get_logger
 import os
+from dask.distributed import Client, LocalCluster
+import dask
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ERA5 → EMO1 downscaling trainer")
@@ -26,6 +28,16 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    # Use all 16 cores: 16 workers, 1 thread each
+    cluster = LocalCluster(
+        n_workers=16,
+        threads_per_worker=1,
+        memory_limit="auto",
+    )
+    client = Client(cluster)
+
+    # optional but explicit
+    dask.config.set(scheduler="distributed")
     args = parse_args()
 
     # ---- Load config FIRST so run_name exists ----

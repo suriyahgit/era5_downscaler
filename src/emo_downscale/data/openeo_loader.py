@@ -16,92 +16,33 @@ logger = get_logger("openeo_loader")
 TIME_CHUNK = 64  # fixed time-steps per chunk
 # lat / lon chunks are taken from patch size (e.g. 128 x 128)
 
-
-# ---------------------------------------------------------------------
-# Optional Dask helper
-# ---------------------------------------------------------------------
-def build_local_cluster(n_workers: int = 8, threads_per_worker: int = 1) -> Client:
-    """
-    Optional helper to spin up a local Dask cluster before running
-    the openEO process graph.
-    """
-    cluster = LocalCluster(
-        n_workers=n_workers,
-        threads_per_worker=threads_per_worker,
-        worker_dashboard_address=False,
-        diagnostics_port=None,
-    )
-    client = Client(cluster)
-    logger.info(
-        f"Started LocalCluster with {n_workers} workers, "
-        f"{threads_per_worker} threads/worker."
-    )
-    return client
-
-
 # ---------------------------------------------------------------------
 # Generic feature-wise writer (time, lat, lon per feature)
 # ---------------------------------------------------------------------
-def _write_featurewise_simple(
-    da: xr.DataArray,
-    base_dir: str,
-    patch_y: int,
-    patch_x: int,
-    role: str,
-) -> None:
-    """
-    Save a multi-band DataArray feature-wise.
+#import dask
 
-    Parameters
-    ----------
-    da : xr.DataArray
-        DataArray with dims (time, bands, lat, lon).
-    base_dir : str
-        Directory where feature_* Zarrs will be written.
-    patch_y : int
-        Chunk size for latitude (usually patch size, e.g. 128).
-    patch_x : int
-        Chunk size for longitude (usually patch size, e.g. 128).
-    role : str
-        Label for logging (e.g. "predictors" or "targets").
-
-    Result
-    ------
-    Creates:
-        base_dir/feature_0.zarr
-        base_dir/feature_1.zarr
-        ...
-    Each Zarr has dims (time, lat, lon) and chunks:
-        time = TIME_CHUNK (64)
-        lat  = patch_y
-        lon  = patch_x
-    """
-
+def _write_featurewise_simple(da, role, base_dir, patch_x, patch_y, time_chunk=64):
     os.makedirs(base_dir, exist_ok=True)
 
     time_dim, bands_dim, lat_dim, lon_dim = da.dims
     n_bands = da.sizes[bands_dim]
-
-    if "bands" in da.coords:
-        band_labels = da.coords["bands"].values
-    else:
-        band_labels = np.arange(n_bands)
+    band_labels = da[bands_dim].values if bands_dim in da.coords else range(n_bands)
 
     logger.info(
-        f"Writing {role} feature-wise to '{base_dir}' "
-        f"with chunks (time={TIME_CHUNK}, lat={patch_y}, lon={patch_x})."
+        f"Feature-wise write for {role}: dims={da.dims}, sizes={dict(da.sizes)}, "
+        f"writing to {base_dir}"
     )
+
+    writes = []
 
     for b in range(n_bands):
         band_label = band_labels[b]
-
-        # Select one band and drop bands dimension -> (time, lat, lon)
         band_da = (
             da.isel({bands_dim: b})
-            .squeeze(bands_dim, drop=True)
+            .squeeze(drop=True)
             .chunk(
                 {
-                    time_dim: TIME_CHUNK,
+                    time_dim: time_chunk,
                     lat_dim: patch_y,
                     lon_dim: patch_x,
                 }
@@ -109,9 +50,17 @@ def _write_featurewise_simple(
         )
 
         out_path = os.path.join(base_dir, f"feature_{b}.zarr")
-        logger.info(f"Saving {role} feature {b} ({band_label}) → {out_path}")
+        logger.info(f"Queueing {role} feature {b} ({band_label}) → {out_path}")
 
-        band_da.to_zarr(out_path, mode="w", consolidated=True)
+        # IMPORTANT: compute=False builds a Dask graph instead of executing immediately
+        write = band_da.to_zarr(out_path, mode="w", consolidated=True, compute=False)
+        writes.append(write)
+
+    # Now execute all writes in parallel using Dask
+    logger.info(f"Submitting {len(writes)} {role} feature writes to Dask")
+    dask.compute(*writes)
+
+
 
 
 # ---------------------------------------------------------------------

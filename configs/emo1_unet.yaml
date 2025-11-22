@@ -3,10 +3,10 @@ seed: 42
 
 data:
   spatial:
-    west: 4    #3
+    west: 3    #3
     east: 6   #18
     south: 42  #42
-    north: 44  #50
+    north: 45  #50
 
   temporal:
     start: "2000-01-01"
@@ -35,8 +35,8 @@ data:
     val_years:   [2019, 2019]
     test_years:  [2020, 2020]
 
-  predictors_feature_dir: "/mnt/.../train_predictors_features"
-  targets_feature_dir: "/mnt/.../train_targets_features"
+  predictors_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/train_predictors_features"
+  targets_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/train_targets_features"
 
   # NEW (optional): target chunk size in bytes (≈5 MB)
   target_chunk_bytes: 5,242,880
