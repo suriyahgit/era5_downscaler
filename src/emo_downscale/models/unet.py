@@ -3,8 +3,6 @@ from torch import nn
 from emo_downscale.logging_utils import get_logger
 logger = get_logger("models.unet")
 
-
-
 class DoubleConv(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()

@@ -1,96 +1,34 @@
+# src/emo_downscale/data/openeo_loader.py
+
 from typing import Dict, Tuple
-
-import os
-
-import numpy as np
 import xarray as xr
-from dask.distributed import Client, LocalCluster
 from openeo.local import LocalConnection
+import dask
+from dask.distributed import get_client
 
 from emo_downscale.logging_utils import get_logger
 logger = get_logger("openeo_loader")
 
-# ---------------------------------------------------------------------
-# Chunking constants
-# ---------------------------------------------------------------------
-TIME_CHUNK = 64  # fixed time-steps per chunk
-# lat / lon chunks are taken from patch size (e.g. 128 x 128)
+TIME_CHUNK = 64  # time chunk (you can tune if needed)
 
-# ---------------------------------------------------------------------
-# Generic feature-wise writer (time, lat, lon per feature)
-# ---------------------------------------------------------------------
-import dask
-
-def _write_featurewise_simple(da, role, base_dir, patch_x, patch_y, time_chunk=64):
-    os.makedirs(base_dir, exist_ok=True)
-
-    time_dim, bands_dim, lat_dim, lon_dim = da.dims
-    n_bands = da.sizes[bands_dim]
-    band_labels = da[bands_dim].values if bands_dim in da.coords else range(n_bands)
-
-    logger.info(
-        f"Feature-wise write for {role}: dims={da.dims}, sizes={dict(da.sizes)}, "
-        f"writing to {base_dir}"
-    )
-
-    writes = []
-
-    for b in range(n_bands):
-        band_label = band_labels[b]
-        band_da = (
-            da.isel({bands_dim: b})
-            .squeeze(drop=True)
-            .chunk(
-                {
-                    time_dim: time_chunk,
-                    lat_dim: patch_y,
-                    lon_dim: patch_x,
-                }
-            )
-        )
-
-        out_path = os.path.join(base_dir, f"feature_{b}.zarr")
-        logger.info(f"Queueing {role} feature {b} ({band_label}) → {out_path}")
-
-        # IMPORTANT: compute=False builds a Dask graph instead of executing immediately
-        write = band_da.to_zarr(out_path, mode="w", consolidated=True, compute=False)
-        writes.append(write)
-
-    # Now execute all writes in parallel using Dask
-    logger.info(f"Submitting {len(writes)} {role} feature writes to Dask")
-    dask.compute(*writes)
-
-
-
-
-# ---------------------------------------------------------------------
-# Main loader
-# ---------------------------------------------------------------------
 def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     """
-    Build and execute the openEO process graph for ERA5/pressure/EMO1/DEM,
-    then save predictors and targets as feature-wise Zarr stores.
+    Load ERA5/pressure/EMO1/DEM via STAC (data on S3), build the openEO process graph,
+    and return *dask-backed* DataArrays with dims (time, bands, lat, lon).
 
-    Workflow
-    --------
-      1. Load ERA5 single-level, ERA5 pressure, EMO1, DEM via STAC.
-      2. Resample ERA5 to DEM grid, merge DEM into predictors.
-      3. Execute to xarray objects (dask-backed).
-      4. Normalize both predictors and targets to dims (time, bands, lat, lon).
-      5. Save predictors feature-wise:
-           predictors_feature_dir/feature_0.zarr, feature_1.zarr, ...
-         each with dims (time, lat, lon), chunks (time=64, lat=patch_y, lon=patch_x).
-      6. Save targets feature-wise:
-           targets_feature_dir/feature_0.zarr, feature_1.zarr, ...
-         same dims & chunking as predictors.
-
-    Returns
-    -------
-    predictors_da : xr.DataArray
-        Predictors DataArray with dims (time, bands, lat, lon), dask-backed.
-    emo1_da : xr.DataArray
-        Targets DataArray with dims (time, bands, lat, lon), dask-backed.
+    Nothing is fully loaded into memory here: we only build the graph and define chunks.
+    Actual S3 reads happen later, when the PyTorch DataLoader asks for patches.
     """
+
+    # Ensure we attach to the global Dask cluster created in train.py
+    try:
+        client = get_client()
+        logger.info(f"Using existing Dask client: {client}")
+    except ValueError:
+        logger.warning("No active Dask client found – falling back to default scheduler.")
+
+
+
 
     # ------------------------------------------------------------------
     # Read config
@@ -100,24 +38,20 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     bands_cfg = data_cfg["bands"]
     urls = data_cfg["stac_urls"]
 
+    logger.debug("=== ENTER load_era5_emo1_cubes ===")
+    logger.debug(f"Spatial: {spatial}")
+    logger.debug(f"Temporal: {temporal}")
+    logger.debug(f"Bands: {bands_cfg}")
+
     patch_cfg = data_cfg["patch"]
     patch_y = patch_cfg["size_y"]  # e.g., 128
     patch_x = patch_cfg["size_x"]  # e.g., 128
 
-    predictors_feature_dir = data_cfg.get(
-        "predictors_feature_dir",
-        "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/train_predictors_features",
-    )
-    targets_feature_dir = data_cfg.get(
-        "targets_feature_dir",
-        "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/train_targets_features",
-    )
-
     logger.info("Creating LocalConnection to openEO backend (./)...")
-    conn = LocalConnection("./")  # local openEO backend
+    conn = LocalConnection("./")
 
     # ------------------------------------------------------------------
-    # Build process graph (lazy)
+    # Build openEO process graph (still lazy)
     # ------------------------------------------------------------------
     logger.info("Building ERA5 / pressure / EMO1 / DEM process graph...")
 
@@ -155,9 +89,9 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     predictors_cube = remap.merge_cubes(dem_expanded)
 
     # ------------------------------------------------------------------
-    # Execute to xarray (dask-backed)
+    # Execute to xarray – this still returns *dask-backed* objects
     # ------------------------------------------------------------------
-    logger.info("Executing predictors and targets process graphs to xarray...")
+    logger.info("Executing process graphs to xarray (building dask graph)...")
     predictors_x = predictors_cube.execute()
     emo1_x = emo1.execute()
 
@@ -187,7 +121,6 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     else:
         emo1_da = emo1_x
 
-    # Infer dimension names and reorder to (time, bands, lat, lon)
     dims_pred = predictors_da.dims
     logger.info(f"Predictors dims before transpose: {dims_pred}")
 
@@ -202,7 +135,9 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     logger.info(f"Predictors dims after transpose: {predictors_da.dims}")
     logger.info(f"Targets dims after transpose:    {emo1_da.dims}")
 
-    # Optionally chunk them in-memory too (helps future ops, but not required)
+    # ------------------------------------------------------------------
+    # Set chunking aligned to patches (and moderate time)
+    # ------------------------------------------------------------------
     predictors_da = predictors_da.chunk(
         {
             time_dim: TIME_CHUNK,
@@ -220,36 +155,5 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
         }
     )
 
-    '''
-
-    # ------------------------------------------------------------------
-    # Save predictors feature-wise: (time, lat, lon) per feature
-    # ------------------------------------------------------------------
-    _write_featurewise_simple(
-        da=predictors_da,
-        base_dir=predictors_feature_dir,
-        patch_y=patch_y,
-        patch_x=patch_x,
-        role="predictors",
-    )
-
-    # ------------------------------------------------------------------
-    # Save targets feature-wise: (time, lat, lon) per feature
-    # ------------------------------------------------------------------
-    _write_featurewise_simple(
-        da=emo1_da,
-        base_dir=targets_feature_dir,
-        patch_y=patch_y,
-        patch_x=patch_x,
-        role="targets",
-    )
-
-    logger.info(
-        "Finished writing predictors and targets as feature-wise Zarr stores."
-    )
-    '''
-    logger.info(
-        "Finished Lazy Loading!"
-    )
-    # Return dask-backed DataArrays (still (time, bands, lat, lon))
+    logger.info("Finished building dask-backed predictors and targets (lazy).")
     return predictors_da, emo1_da
