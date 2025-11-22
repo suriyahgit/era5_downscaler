@@ -6,8 +6,9 @@ from torch.utils.data import DataLoader
 
 from emo_downscale.data.openeo_loader import load_era5_emo1_cubes
 from emo_downscale.data.datasets import LazyPatchDataset
-import logging
-logger1 = logging.getLogger(__name__)
+from emo_downscale.logging_utils import get_logger
+logger = get_logger("datamodule")
+
 
 
 class DownscaleDataModule(pl.LightningDataModule):
@@ -27,7 +28,7 @@ class DownscaleDataModule(pl.LightningDataModule):
 
         # 1. load xarray cubes via openeo-processes-dask
         predictors_ds, target_ds = load_era5_emo1_cubes(data_cfg)
-        logger1.info("Dask Graph Computed Successfully!")
+        logger.info("Dask Graph Computed Successfully!")
 
         # standardize to DataArray: (time, C, Y, X)
         preds_da = predictors_ds.transpose("time", "bands", "lat", "lon")

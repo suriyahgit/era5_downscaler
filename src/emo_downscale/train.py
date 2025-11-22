@@ -2,40 +2,16 @@
 
 import argparse
 from typing import Any, Dict
-import os
-import logging
-from datetime import datetime
-import traceback
 
 import lightning.pytorch as pl
 from lightning.pytorch.loggers import MLFlowLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
-import torch
 
 from emo_downscale.config import load_config
 from emo_downscale.data.datamodule import DownscaleDataModule
 from emo_downscale.models.registry import create_model
 from emo_downscale.models.module import DownscaleLightningModule
-
-
-def setup_logging(run_name: str) -> logging.Logger:
-    os.makedirs("logs", exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_path = os.path.join("logs", f"{run_name}_{ts}.log")
-
-    # Root logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(log_path, mode="w"),
-        ],
-        force=True,  # override any previous basicConfig
-    )
-    logger = logging.getLogger(__name__)
-    logger.info(f"Logging to {log_path}")
-    return logger
+from emo_downscale.logging_utils import setup_global_logger, get_logger
 
 
 def parse_args() -> argparse.Namespace:
@@ -52,35 +28,37 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    # Load config first (to get run_name)
+    # ---- Load config FIRST so run_name exists ----
     cfg: Dict[str, Any] = load_config(args.config)
     run_name = cfg.get("run_name", "downscale_run")
 
-    logger1 = setup_logging(run_name)
-    logger1.info("Loaded configuration.")
-    logger1.info(f"Using config file: {args.config}")
+    # ---- Initialize project-wide logger ----
+    root_logger = setup_global_logger(run_name)
+    log = get_logger("train")
+    log.info("Loaded configuration.")
+    log.info(f"Using config file: {args.config}")
 
     try:
         pl.seed_everything(cfg.get("seed", 42), workers=True)
-        logger1.info("Random seed set.")
+        log.info("Random seed set.")
 
         # ---- MLflow logger ----
         mlflow_cfg = cfg["mlflow"]
-        logger = MLFlowLogger(
+        mlflow_logger = MLFlowLogger(
             experiment_name=mlflow_cfg["experiment_name"],
             tracking_uri=mlflow_cfg["tracking_uri"],
             run_name=cfg["run_name"] + mlflow_cfg.get("run_name_suffix", ""),
         )
-        logger1.info("Initialized MLflow logger.")
+        log.info("Initialized MLflow logger.")
 
         # ---- DataModule ----
         datamodule = DownscaleDataModule(cfg)
-        logger1.info("Initialized data module.")
+        log.info("Initialized data module.")
 
         # ---- Model ----
         model_cfg = cfg["model"]
         backbone = create_model(model_cfg["name"], **model_cfg["params"])
-        logger1.info("Model created.")
+        log.info("Model created.")
 
         lit_model = DownscaleLightningModule(
             model=backbone,
@@ -108,25 +86,22 @@ def main() -> None:
             accelerator=trainer_cfg["accelerator"],
             devices=trainer_cfg["devices"],
             precision=trainer_cfg["precision"],
-            logger=logger,
+            logger=mlflow_logger,
             callbacks=[ckpt_cb, es_cb],
             gradient_clip_val=trainer_cfg["gradient_clip_val"],
             log_every_n_steps=50,
         )
 
-        logger1.info("Model summary:")
-        logger1.info(str(backbone))
+        log.info("Model summary:")
+        log.info(str(backbone))
 
         trainer.fit(lit_model, datamodule=datamodule)
-        logger1.info("Training finished successfully.")
+        log.info("Training finished successfully.")
 
-    except Exception as e:
-        # Make sure crashes are logged
-        logger1.error("Fatal error during training!", exc_info=True)
-        # Optional: also log traceback as string for readability
-        tb = traceback.format_exc()
-        logger1.error(f"Traceback:\n{tb}")
-        raise  # keep non-zero exit code
+    except Exception:
+        # Any crash bubbled up from datamodule / loader / model will be logged
+        log.exception("Fatal error during training!")
+        raise
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 from typing import Dict, Tuple
 
-import logging
 import os
 
 import numpy as np
@@ -8,7 +7,8 @@ import xarray as xr
 from dask.distributed import Client, LocalCluster
 from openeo.local import LocalConnection
 
-logger = logging.getLogger(__name__)
+from emo_downscale.logging_utils import get_logger
+logger = get_logger("openeo_loader")
 
 # ---------------------------------------------------------------------
 # Chunking constants

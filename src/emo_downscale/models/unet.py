@@ -1,5 +1,8 @@
 import torch
 from torch import nn
+from emo_downscale.logging_utils import get_logger
+logger = get_logger("models.unet")
+
 
 
 class DoubleConv(nn.Module):

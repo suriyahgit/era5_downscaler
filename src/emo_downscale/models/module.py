@@ -4,6 +4,8 @@ import torch
 from torch import nn
 import lightning.pytorch as pl
 import torch.nn.functional as F
+from emo_downscale.logging_utils import get_logger
+logger = get_logger("models.module")
 
 
 class DownscaleLightningModule(pl.LightningModule):

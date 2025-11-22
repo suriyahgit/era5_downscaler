@@ -3,7 +3,8 @@ import torch
 from torch.utils.data import Dataset
 import xarray as xr
 import numpy as np
-
+from emo_downscale.logging_utils import get_logger
+logger = get_logger("datasets")
 
 class LazyPatchDataset(Dataset):
     """
