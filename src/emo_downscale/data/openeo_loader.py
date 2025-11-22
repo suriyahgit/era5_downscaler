@@ -19,7 +19,7 @@ TIME_CHUNK = 64  # fixed time-steps per chunk
 # ---------------------------------------------------------------------
 # Generic feature-wise writer (time, lat, lon per feature)
 # ---------------------------------------------------------------------
-#import dask
+import dask
 
 def _write_featurewise_simple(da, role, base_dir, patch_x, patch_y, time_chunk=64):
     os.makedirs(base_dir, exist_ok=True)
@@ -220,6 +220,8 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
         }
     )
 
+    '''
+
     # ------------------------------------------------------------------
     # Save predictors feature-wise: (time, lat, lon) per feature
     # ------------------------------------------------------------------
@@ -245,6 +247,9 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     logger.info(
         "Finished writing predictors and targets as feature-wise Zarr stores."
     )
-
+    '''
+    logger.info(
+        "Finished Lazy Loading!"
+    )
     # Return dask-backed DataArrays (still (time, bands, lat, lon))
     return predictors_da, emo1_da

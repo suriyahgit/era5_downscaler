@@ -9,8 +9,6 @@ from emo_downscale.data.datasets import LazyPatchDataset
 from emo_downscale.logging_utils import get_logger
 logger = get_logger("datamodule")
 
-
-
 class DownscaleDataModule(pl.LightningDataModule):
     def __init__(self, cfg: Dict[str, Any]):
         super().__init__()
