@@ -16,7 +16,7 @@ data:
     era5: ["t2m", "ssrd", "tp"]
     pressure: ["t_850"]
     dem: ["dem"]
-    emo1: ["ta24", "pr", "rg"]
+    emo1: ["ta24"]
 
   stac_urls:
     ERA5_T2M_SSRD_TP: "https://stac.intertwin.fedcloud.eu/collections/ERA5_T2M_SSRD_TP"
