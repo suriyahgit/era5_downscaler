@@ -12,7 +12,7 @@ from emo_downscale.data.datamodule import DownscaleDataModule
 from emo_downscale.models.registry import create_model
 from emo_downscale.models.module import DownscaleLightningModule
 from emo_downscale.logging_utils import setup_global_logger, get_logger
-
+import os
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ERA5 → EMO1 downscaling trainer")

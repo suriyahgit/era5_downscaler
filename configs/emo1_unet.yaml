@@ -3,10 +3,10 @@ seed: 42
 
 data:
   spatial:
-    west: 3
-    east: 18
-    south: 42
-    north: 50
+    west: 4    #3
+    east: 6   #18
+    south: 42  #42
+    north: 44  #50
 
   temporal:
     start: "2000-01-01"
