@@ -9,7 +9,7 @@ from dask.distributed import get_client
 from emo_downscale.logging_utils import get_logger
 logger = get_logger("openeo_loader")
 
-TIME_CHUNK = 64  # time chunk (you can tune if needed)
+TIME_CHUNK = 1  # time chunk (you can tune if needed)
 
 def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     """
