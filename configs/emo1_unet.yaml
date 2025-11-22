@@ -3,20 +3,20 @@ seed: 42
 
 data:
   spatial:
-    west: 10
-    east: 15
+    west: 3
+    east: 18
     south: 42
-    north: 47
+    north: 50
 
   temporal:
-    start: "2016-01-01"
+    start: "2000-01-01"
     end: "2020-12-31"
 
   bands:
     era5: ["t2m", "ssrd", "tp"]
     pressure: ["t_850"]
     dem: ["dem"]
-    emo1: ["ta24"]
+    emo1: ["ta24", "pr", "rg"]
 
   stac_urls:
     ERA5_T2M_SSRD_TP: "https://stac.intertwin.fedcloud.eu/collections/ERA5_T2M_SSRD_TP"
@@ -61,8 +61,8 @@ trainer:
 
   optimizer:
     name: "adamw"
-    lr: 3e-4
-    weight_decay: 1e-5
+    lr: 0.0003
+    weight_decay: 0.00001
 
   scheduler:
     name: "cosine"

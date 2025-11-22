@@ -75,4 +75,14 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.Dataset, xr.Dataset]:
     #predictors_cube, emo1_aligned = xr.align(predictors_cube, emo1, join="inner")
     logger.info(f"Predictor cube shape: {predictors_cube.shape}")
     logger.info(f"Target cube shape: {emo1.shape}")
+
+    # choose chunks aligned with your patch size (e.g., 128x128 or 64x64)
+    pred_chunk = {"time": 1, "lat": 128, "lon": 128}
+    targ_chunk = {"time": 1, "lat": 128, "lon": 128}
+    
+    predictors_cube = predictors_cube.chunk(pred_chunk)
+    emo1 = emo1.chunk(targ_chunk)
+
+    predictors_cube.to_zarr("/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/train_predictors_t2m.zarr", mode="w")
+    emo1.to_zarr("/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/train_targets_t2m.zarr", mode="w")
     return predictors_cube, emo1
