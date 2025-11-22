@@ -35,6 +35,12 @@ data:
     val_years:   [2019, 2019]
     test_years:  [2020, 2020]
 
+  predictors_feature_dir: "/mnt/.../train_predictors_features"
+  targets_feature_dir: "/mnt/.../train_targets_features"
+
+  # NEW (optional): target chunk size in bytes (≈5 MB)
+  target_chunk_bytes: 5,242,880
+
 model:
   name: "unet"
   params:
