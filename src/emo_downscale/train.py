@@ -41,9 +41,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     # 16 cores → 16 workers × 1 thread each
     cluster = LocalCluster(
-        n_workers=8,
+        n_workers=14,
         threads_per_worker=1,
-        memory_limit="12GB",          # 16 * 6GB ≈ 96GB < 100GB
+        memory_limit="7GB",          # 16 * 6GB ≈ 96GB < 100GB
         worker_dashboard_address=False,
         diagnostics_port=None,
         silence_logs="WARNING",  # <--- add this
