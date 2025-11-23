@@ -38,6 +38,22 @@ class DownscaleDataModule(pl.LightningDataModule):
         preds_da = predictors_ds.transpose("time", "bands", "lat", "lon")
         targs_da = target_ds.transpose("time", "bands", "lat", "lon")
 
+        # === Rechunk for training: patch-aligned + time=1 ===
+        patch_cfg = data_cfg["patch"]
+        patch_h = patch_cfg["size_y"]
+        patch_w = patch_cfg["size_x"]
+
+        train_chunks = {
+            "time": data_cfg.get("train_chunk_time", 1),
+            "bands": -1,
+            "lat":  patch_h,
+            "lon":  patch_w,
+        }
+
+        preds_da = preds_da.chunk(train_chunks)
+        targs_da = targs_da.chunk(train_chunks)
+        logger.info(f"Rechunked predictors/targets for training: {train_chunks}")
+
         years = predictors_ds["time"].dt.year.values
         split = data_cfg["split"]
 
