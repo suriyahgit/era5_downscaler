@@ -4,9 +4,9 @@ seed: 42
 data:
   spatial:
     west: 3    #3
-    east: 6   #18
+    east: 18   #18
     south: 42  #42
-    north: 45  #50
+    north: 50  #50
 
   temporal:
     start: "2015-01-01"
@@ -35,12 +35,17 @@ data:
     val_years:   [2019, 2019]
     test_years:  [2020, 2020]
 
+  write_chunk_time: 1
+  write_chunk_lat: 128
+  write_chunk_lon: 128
+
   predictors_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/train_predictors_features"
   targets_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/train_targets_features"
 
   # new flags
-  use_cached_zarr: true          # if Zarr exists → just open it
-  write_cached_zarr: true        # if not exists → build via openEO & write
+  use_cached_zarr: true
+  write_cached_zarr: false
+
   predictors_zarr_name: "predictors.zarr"
   targets_zarr_name: "targets.zarr"
 

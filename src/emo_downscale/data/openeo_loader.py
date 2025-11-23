@@ -5,6 +5,8 @@ import os
 import xarray as xr
 from openeo.local import LocalConnection
 from dask.distributed import get_client
+import copy
+import dask.array as da  # optional, but often handy
 
 from emo_downscale.logging_utils import get_logger
 logger = get_logger("openeo_loader")
@@ -47,36 +49,34 @@ def _open_cached_if_available(data_cfg: Dict):
 
     return None, None
 
-def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
-    # 0. Try cached Zarr first
-    preds_da, emo1_da = _open_cached_if_available(data_cfg)
-    if preds_da is not None and emo1_da is not None:
-        # Ensure correct order (time, bands, lat, lon) just in case
-        preds_da = preds_da.transpose("time", "bands", "lat", "lon")
-        emo1_da  = emo1_da.transpose("time", "bands", "lat", "lon")
-        return preds_da, emo1_da
+def _load_era5_emo1_core(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
+    """
+    Core loader:
+      - builds ERA5/EMO1/DEM graph via openEO
+      - executes to xarray (dask-backed)
+      - normalizes to (time, bands, lat, lon)
+    NO caching, NO zarr writing here.
+    """
 
-    # 1. Attach to global Dask cluster (like you already do)
+    # Attach to cluster if present
     try:
         client = get_client()
-        logger.info(f"Using existing Dask client: {client}")
+        logger.info(f"[core] Using existing Dask client: {client}")
     except ValueError:
-        logger.warning("No active Dask client found – falling back to default scheduler.")
+        logger.warning("[core] No active Dask client found – falling back to default scheduler.")
 
     spatial = data_cfg["spatial"]
     temporal = [data_cfg["temporal"]["start"], data_cfg["temporal"]["end"]]
     bands_cfg = data_cfg["bands"]
     urls = data_cfg["stac_urls"]
 
-    patch_cfg = data_cfg["patch"]
-    patch_y = patch_cfg["size_y"]
-    patch_x = patch_cfg["size_x"]
+    logger.info(f"[core] temporal range: {temporal[0]} → {temporal[1]}")
 
-    logger.info("Creating LocalConnection to openEO backend (./)...")
+    logger.info("[core] Creating LocalConnection to openEO backend (./)...")
     conn = LocalConnection("./")
 
-    # 2. Build openEO graph (lazy)
-    logger.info("Building ERA5 / pressure / EMO1 / DEM process graph...")
+    # 1. Build openEO graph
+    logger.info("[core] Building ERA5 / pressure / EMO1 / DEM process graph...")
     era5_single = conn.load_stac(
         url=urls["ERA5_T2M_SSRD_TP"],
         spatial_extent=spatial,
@@ -106,11 +106,11 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     dem_expanded = dem.resample_cube_temporal(remap)
     predictors_cube = remap.merge_cubes(dem_expanded)
 
-    logger.info("Executing process graphs to xarray (building dask graph)...")
+    logger.info("[core] Executing process graphs to xarray (building dask graph)...")
     predictors_x = predictors_cube.execute()
     emo1_x = emo1.execute()
 
-    # 3. Normalize to (time, bands, lat, lon)  [same as you have now]
+    # 2. Normalize to DataArray
     if isinstance(predictors_x, xr.Dataset):
         pred_var = list(predictors_x.data_vars)[0]
         predictors_da = predictors_x[pred_var]
@@ -123,6 +123,7 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     else:
         emo1_da = emo1_x
 
+    # 3. Normalize dims to (time, bands, lat, lon)
     dims_pred = predictors_da.dims
     time_dim = next(d for d in dims_pred if "time" in d)
     lat_dim = next(d for d in dims_pred if d in ("lat", "y", "latitude", "ycoord"))
@@ -132,46 +133,69 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     predictors_da = predictors_da.transpose(time_dim, bands_dim, lat_dim, lon_dim)
     emo1_da      = emo1_da.transpose(time_dim, bands_dim, lat_dim, lon_dim)
 
-    # Dimension names after transpose
-    time_dim = "time"
-    bands_dim = "bands"
-    lat_dim = "lat"
-    lon_dim = "lon"
+    logger.info(f"[core] Predictors dims after transpose: {predictors_da.dims}")
+    logger.info(f"[core] Targets dims after transpose:    {emo1_da.dims}")
 
-    # Coarse chunks for writing to Zarr (configurable, but with safe defaults)
+    return predictors_da, emo1_da
+
+
+def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
+    """
+    Public loader used by the training DataModule.
+
+    It:
+      - optionally opens cached Zarr
+      - otherwise builds predictors/targets via _load_era5_emo1_core
+      - optionally writes Zarr cache
+      - returns dask-backed DataArrays (time, bands, lat, lon)
+    """
+    # 0. Try cached Zarr first
+    preds_da, emo1_da = _open_cached_if_available(data_cfg)
+    if preds_da is not None and emo1_da is not None:
+        patch_cfg = data_cfg["patch"]
+        patch_y = patch_cfg["size_y"]
+        patch_x = patch_cfg["size_x"]
+
+        preds_da = preds_da.transpose("time", "bands", "lat", "lon")
+        emo1_da  = emo1_da.transpose("time", "bands", "lat", "lon")
+
+        # Rechunk for training here if you want, or let DataModule handle it
+        logger.info("[load] Loaded from cached Zarr.")
+        return preds_da, emo1_da
+
+    # 1. Build from openEO for full temporal range
+    predictors_da, emo1_da = _load_era5_emo1_core(data_cfg)
+
+    # 2. Coarse chunks for writing to Zarr
+    time_dim, bands_dim, lat_dim, lon_dim = "time", "bands", "lat", "lon"
     write_chunks = {
         time_dim: data_cfg.get("write_chunk_time", 8),
-        bands_dim: -1,  # all bands together
+        bands_dim: -1,
         lat_dim: data_cfg.get("write_chunk_lat", 256),
         lon_dim: data_cfg.get("write_chunk_lon", 256),
     }
 
     predictors_write = predictors_da.chunk(write_chunks)
-    emo1_write = emo1_da.chunk(write_chunks)
+    emo1_write       = emo1_da.chunk(write_chunks)
+    logger.info(f"[load] Using coarse chunks for Zarr write: {write_chunks}")
 
-    logger.info(
-        f"Using coarse chunks for Zarr write: {write_chunks}"
-    )
-
-        # 5. Optionally write to Zarr cache (using coarse chunks)
+    # 3. Optionally write Zarr cache
     if data_cfg.get("write_cached_zarr", False):
         pred_store, targ_store = _zarr_paths(data_cfg)
         if pred_store and targ_store:
-            logger.info(f"Writing predictors Zarr to {pred_store}")
+            logger.info(f"[load] Writing predictors Zarr to {pred_store}")
             predictors_write.to_dataset(name="predictors").to_zarr(
                 pred_store,
                 mode="w",
                 consolidated=True,
             )
-
-            logger.info(f"Writing targets Zarr to {targ_store}")
+            logger.info(f"[load] Writing targets Zarr to {targ_store}")
             emo1_write.to_dataset(name="targets").to_zarr(
                 targ_store,
                 mode="w",
                 consolidated=True,
             )
-
-            logger.info("Finished writing cached Zarr stores.")
-
+            logger.info("[load] Finished writing cached Zarr stores.")
 
     return predictors_da, emo1_da
+
