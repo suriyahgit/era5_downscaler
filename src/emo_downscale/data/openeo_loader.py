@@ -132,30 +132,46 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     predictors_da = predictors_da.transpose(time_dim, bands_dim, lat_dim, lon_dim)
     emo1_da      = emo1_da.transpose(time_dim, bands_dim, lat_dim, lon_dim)
 
-    # 4. Chunk aligned to patches
-    predictors_da = predictors_da.chunk(
-        {time_dim: TIME_CHUNK, bands_dim: 1, lat_dim: patch_y, lon_dim: patch_x}
-    )
-    emo1_da = emo1_da.chunk(
-        {time_dim: TIME_CHUNK, bands_dim: 1, lat_dim: patch_y, lon_dim: patch_x}
+    # Dimension names after transpose
+    time_dim = "time"
+    bands_dim = "bands"
+    lat_dim = "lat"
+    lon_dim = "lon"
+
+    # Coarse chunks for writing to Zarr (configurable, but with safe defaults)
+    write_chunks = {
+        time_dim: data_cfg.get("write_chunk_time", 8),
+        bands_dim: -1,  # all bands together
+        lat_dim: data_cfg.get("write_chunk_lat", 256),
+        lon_dim: data_cfg.get("write_chunk_lon", 256),
+    }
+
+    predictors_write = predictors_da.chunk(write_chunks)
+    emo1_write = emo1_da.chunk(write_chunks)
+
+    logger.info(
+        f"Using coarse chunks for Zarr write: {write_chunks}"
     )
 
-    logger.info("Finished building dask-backed predictors and targets (lazy).")
-
-    # 5. Optionally write to Zarr cache
+        # 5. Optionally write to Zarr cache (using coarse chunks)
     if data_cfg.get("write_cached_zarr", False):
         pred_store, targ_store = _zarr_paths(data_cfg)
         if pred_store and targ_store:
             logger.info(f"Writing predictors Zarr to {pred_store}")
-            predictors_da.to_dataset(name="predictors").to_zarr(
-                pred_store, mode="w", consolidated=True
+            predictors_write.to_dataset(name="predictors").to_zarr(
+                pred_store,
+                mode="w",
+                consolidated=True,
             )
 
             logger.info(f"Writing targets Zarr to {targ_store}")
-            emo1_da.to_dataset(name="targets").to_zarr(
-                targ_store, mode="w", consolidated=True
+            emo1_write.to_dataset(name="targets").to_zarr(
+                targ_store,
+                mode="w",
+                consolidated=True,
             )
 
             logger.info("Finished writing cached Zarr stores.")
+
 
     return predictors_da, emo1_da
