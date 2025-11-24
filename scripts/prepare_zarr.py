@@ -7,16 +7,15 @@ from typing import Any, Dict
 import dask
 from dask.distributed import Client, LocalCluster
 import xarray as xr
+import os  # <-- NEW
 
 from datetime import datetime, timedelta
-
 
 from emo_downscale.config import load_config
 from emo_downscale.data.openeo_loader import _load_era5_emo1_core, _zarr_paths
 from emo_downscale.logging_utils import setup_global_logger, get_logger
 
 logger = get_logger("prepare_zarr")
-
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -36,9 +35,9 @@ def build_cluster() -> Client:
     Use a similar cluster to train.py, but dedicated to data prep.
     """
     cluster = LocalCluster(
-        n_workers=14,
+        n_workers=4,
         threads_per_worker=1,
-        memory_limit="7GB",
+        memory_limit="24GB",
         worker_dashboard_address=False,
         diagnostics_port=None,
         silence_logs="WARNING",
@@ -66,17 +65,17 @@ def prepare_year(
     year: int,
     pred_store: str,
     targ_store: str,
-    first: bool,
 ) -> None:
     """
     Process a single year:
       - override temporal range
       - call core openEO loader
       - coarsely chunk
-      - write/append to Zarr along time
+      - write Zarr for *this* year only (no appending).
     """
     data_cfg = copy.deepcopy(base_data_cfg)
     data_cfg["temporal"]["start"] = f"{year}-01-01"
+    # include last day by going to Jan 1 of next year
     data_cfg["temporal"]["end"] = (datetime(year, 12, 31) + timedelta(days=1)).strftime("%Y-%m-%d")
 
     # ensure we don't enter any cached path inside core
@@ -102,23 +101,15 @@ def prepare_year(
     preds_ds = preds_write.to_dataset(name="predictors")
     targs_ds = emo1_write.to_dataset(name="targets")
 
-    mode = "w" if first else "a"
-
     logger.info(
-        f"Year {year}: writing to Zarr (mode={mode}) → {pred_store}, {targ_store}"
+        f"Year {year}: writing per-year Zarr → {pred_store}, {targ_store}"
     )
 
-    if first:
-        # first year: create store
-        preds_ds.to_zarr(pred_store, mode="w", consolidated=True)
-        targs_ds.to_zarr(targ_store, mode="w", consolidated=True)
-    else:
-        # subsequent years: append along time
-        preds_ds.to_zarr(pred_store, mode="a", append_dim="time")
-        targs_ds.to_zarr(targ_store, mode="a", append_dim="time")
+    # always write a fresh store for that year
+    preds_ds.to_zarr(pred_store, mode="w", consolidated=True)
+    targs_ds.to_zarr(targ_store, mode="w", consolidated=True)
 
-    logger.info(f"Year {year}: finished writing to Zarr.")
-
+    logger.info(f"Year {year}: finished writing year-specific Zarr.")
 
 def main():
     args = parse_args()
@@ -127,30 +118,39 @@ def main():
     setup_global_logger(run_name + "_prepare")
 
     data_cfg = cfg["data"]
-    pred_store, targ_store = _zarr_paths(data_cfg)
+    base_pred_store, base_targ_store = _zarr_paths(data_cfg)
 
-    if not pred_store or not targ_store:
+    if not base_pred_store or not base_targ_store:
         raise RuntimeError("predictors_feature_dir or targets_feature_dir not set in config.")
+
+    # Derive directory + base names
+    pred_dir = os.path.dirname(base_pred_store)
+    targ_dir = os.path.dirname(base_targ_store)
+
+    pred_base = os.path.basename(base_pred_store)  # e.g. "predictors.zarr"
+    targ_base = os.path.basename(base_targ_store)  # e.g. "targets.zarr"
+
+    # Strip optional ".zarr" suffix
+    pred_root = pred_base[:-5] if pred_base.endswith(".zarr") else pred_base
+    targ_root = targ_base[:-5] if targ_base.endswith(".zarr") else targ_base
 
     client = build_cluster()
 
     years = list(year_range_from_cfg(data_cfg))
-    logger.info(f"Preparing Zarr for years: {years}")
-    logger.info(f"Predictors store: {pred_store}")
-    logger.info(f"Targets store:    {targ_store}")
+    logger.info(f"Preparing per-year Zarr for years: {years}")
+    logger.info(f"Base predictors dir: {pred_dir}, root: {pred_root}")
+    logger.info(f"Base targets    dir: {targ_dir}, root: {targ_root}")
 
-    # ------------------------------------------------------------------
-    # Simple, robust: sequential year processing
-    # This avoids any giant graph and stays within memory comfortably.
-    # ------------------------------------------------------------------
-    first = True
     for y in years:
-        prepare_year(data_cfg, y, pred_store, targ_store, first=first)
-        first = False
+        year_pred_store = os.path.join(pred_dir, f"{pred_root}_{y}.zarr")
+        year_targ_store = os.path.join(targ_dir, f"{targ_root}_{y}.zarr")
+        logger.info(f"Year {y}: predictors store → {year_pred_store}")
+        logger.info(f"Year {y}: targets    store → {year_targ_store}")
 
-    logger.info("All years processed. Zarr caches ready.")
+        prepare_year(data_cfg, y, year_pred_store, year_targ_store)
+
+    logger.info("All years processed. Year-wise Zarr caches ready.")
     client.close()
-
 
 if __name__ == "__main__":
     main()

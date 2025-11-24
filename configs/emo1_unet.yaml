@@ -9,7 +9,7 @@ data:
     north: 50  #50
 
   temporal:
-    start: "2000-01-01"
+    start: "2001-01-01"
     end: "2020-12-31"
 
   bands:
@@ -39,11 +39,11 @@ data:
   write_chunk_lat: 128
   write_chunk_lon: 128
 
-  predictors_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/train_predictors_features"
-  targets_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/train_targets_features"
+  predictors_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/features_cnn"
+  targets_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/targets_cnn"
 
   # new flags
-  use_cached_zarr: true
+  use_cached_zarr: false
   write_cached_zarr: false
 
   predictors_zarr_name: "predictors.zarr"
