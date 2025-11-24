@@ -149,6 +149,10 @@ def prepare_year(
     preds_ds.to_zarr(pred_store, mode="w", consolidated=True)
     targs_ds.to_zarr(targ_store, mode="w", consolidated=True)
 
+    del preds_da, emo1_da, preds_write, emo1_write, preds_ds, targs_ds
+    import gc
+    gc.collect()
+
     logger.info(f"Year {year}: finished writing year-specific Zarr.")
 
 
@@ -190,17 +194,19 @@ def main():
             year_targ_store = os.path.join(targ_dir, f"{targ_root}_{y}.zarr")
             logger.info(f"Year {y}: predictors store → {year_pred_store}")
             logger.info(f"Year {y}: targets    store → {year_targ_store}")
-
+        
+            # soft reset: clear scheduler state + restart workers
+            logger.info(f"Restarting Dask cluster before processing year {y}...")
+            client.restart()
+        
             try:
                 prepare_year(data_cfg, y, year_pred_store, year_targ_store)
             except Exception:
                 logger.exception(f"Year {y}: failure during prepare_year.")
-                # on any failure, snapshot the Dask state + worker logs
                 try:
                     dump_dask_state(client, logger)
                 except Exception:
                     logger.exception("Also failed to inspect Dask workers.")
-                # re-raise so your batch job still fails visibly
                 raise
 
         logger.info("All years processed. Year-wise Zarr caches ready.")
