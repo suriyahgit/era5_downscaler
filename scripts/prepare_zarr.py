@@ -75,8 +75,8 @@ def build_cluster() -> Client:
         threads_per_worker=1,
         memory_limit="24GB",
         # for debugging, turn ON dashboard instead of hiding it
-        dashboard_address=":8787",
-        diagnostics_port=8788,
+        dashboard_address=":5054",
+        diagnostics_port=5055,
         silence_logs="WARNING",
     )
     client = Client(cluster)
