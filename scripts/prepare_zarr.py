@@ -71,9 +71,9 @@ def build_cluster() -> Client:
     Use a similar cluster to train.py, but dedicated to data prep.
     """
     cluster = LocalCluster(
-        n_workers=4,
+        n_workers=8,
         threads_per_worker=1,
-        memory_limit="24GB",
+        memory_limit="12GB",
         # for debugging, turn ON dashboard instead of hiding it
         dashboard_address=":5054",
         diagnostics_port=5055,
