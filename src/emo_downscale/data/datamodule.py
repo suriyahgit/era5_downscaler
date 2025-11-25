@@ -13,17 +13,6 @@ from emo_downscale.logging_utils import get_logger
 
 logger = get_logger("datamodule")
 
-from dask.distributed import performance_report
-client = get_client()
-client.run(lambda: None)
-client.workers
-
-dask.config.set({
-    'distributed.worker.memory.target': 0.95,
-    'distributed.worker.memory.spill': False,
-    'distributed.worker.profile': False,
-    'distributed.scheduler.work-stealing': True,
-})
 
 class DownscaleDataModule(pl.LightningDataModule):
     """
@@ -42,11 +31,12 @@ class DownscaleDataModule(pl.LightningDataModule):
         super().__init__()
         self.cfg = cfg
 
-        training_cfg = cfg.get("training", {})
-        self.batch_size: int = int(training_cfg.get("batch_size", 256))
-        self.num_workers: int = int(training_cfg.get("num_workers", 0) or 0)
-        self.pin_memory: bool = bool(training_cfg.get("pin_memory", False))
-        self.drop_last: bool = bool(training_cfg.get("drop_last", True))
+        trainer_cfg = cfg.get("trainer", {})
+        self.batch_size: int = int(trainer_cfg.get("batch_size", 256))
+        self.num_workers: int = int(trainer_cfg.get("num_workers", 0) or 0)
+        self.pin_memory: bool = bool(trainer_cfg.get("pin_memory", False))
+        self.drop_last: bool = bool(trainer_cfg.get("drop_last", True))
+
 
         # Internal datasets
         self._train_ds: Optional[LazyPatchDataset] = None
@@ -257,8 +247,9 @@ class DownscaleDataModule(pl.LightningDataModule):
 
         if self.num_workers > 0:
             # Only meaningful when using worker processes
-            training_cfg = self.cfg.get("training", {})
-            prefetch_factor = int(training_cfg.get("prefetch_factor", 2))
+            trainer_cfg = self.cfg.get("trainer", {})
+            prefetch_factor = int(trainer_cfg.get("prefetch_factor", 2))
+
             kwargs.update(
                 dict(
                     persistent_workers=True,

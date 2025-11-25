@@ -42,25 +42,27 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    # 16 cores → 16 workers × 1 thread each
-    # src/emo_downscale/train.py
-
     cluster = LocalCluster(
-        n_workers=4,              # fewer workers = less overhead
-        threads_per_worker=2,     # parallel per worker
-        memory_limit="20GB",      # use machine RAM effectively
+        n_workers=4,
+        threads_per_worker=2,
+        memory_limit="20GB",
         processes=True,
         dashboard_address=":8787",
     )
 
     client = Client(cluster)
-    
+
+    # Make sure we use this scheduler
     dask.config.set(scheduler="distributed")
 
-    scheduler_address = client.scheduler.address
+    # IO / memory tuning lives HERE (after client exists)
+    dask.config.set({
+        "distributed.worker.memory.target": 0.95,
+        "distributed.worker.memory.spill": False,
+        "distributed.worker.profile": False,
+        "distributed.scheduler.work-stealing": True,
+    })
 
-    # Make sure everyone (including openEO) uses this cluster
-    dask.config.set(scheduler="distributed")
     args = parse_args()
 
     # ---- Load config FIRST so run_name exists ----
