@@ -13,6 +13,17 @@ from emo_downscale.logging_utils import get_logger
 
 logger = get_logger("datamodule")
 
+from dask.distributed import performance_report
+client = get_client()
+client.run(lambda: None)
+client.workers
+
+dask.config.set({
+    'distributed.worker.memory.target': 0.95,
+    'distributed.worker.memory.spill': False,
+    'distributed.worker.profile': False,
+    'distributed.scheduler.work-stealing': True,
+})
 
 class DownscaleDataModule(pl.LightningDataModule):
     """
@@ -32,9 +43,9 @@ class DownscaleDataModule(pl.LightningDataModule):
         self.cfg = cfg
 
         training_cfg = cfg.get("training", {})
-        self.batch_size: int = int(training_cfg.get("batch_size", 8))
+        self.batch_size: int = int(training_cfg.get("batch_size", 256))
         self.num_workers: int = int(training_cfg.get("num_workers", 0) or 0)
-        self.pin_memory: bool = bool(training_cfg.get("pin_memory", True))
+        self.pin_memory: bool = bool(training_cfg.get("pin_memory", False))
         self.drop_last: bool = bool(training_cfg.get("drop_last", True))
 
         # Internal datasets
@@ -138,10 +149,10 @@ class DownscaleDataModule(pl.LightningDataModule):
         test_chunk_time = int(data_cfg.get("test_chunk_time", val_chunk_time))
 
         train_chunks = {
-            "time": train_chunk_time,
+            "time": 4,                # bigger chunk = fewer tasks
             "bands": -1,
-            "lat": patch_h,
-            "lon": patch_w,
+            "lat": 128,
+            "lon": 128,
         }
         val_chunks = {
             "time": val_chunk_time,

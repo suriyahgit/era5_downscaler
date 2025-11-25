@@ -19,6 +19,8 @@ import os
 from dask.distributed import Client, LocalCluster
 import dask
 import logging
+import torch
+torch.set_float32_matmul_precision("high")
 
 # Silence Dask logs globally
 logging.getLogger("distributed").setLevel(logging.WARNING)
@@ -44,13 +46,13 @@ def main() -> None:
     # src/emo_downscale/train.py
 
     cluster = LocalCluster(
-        n_workers=16,             # one worker per core
-        threads_per_worker=1,
-        memory_limit="6GB",       # 16 * 6GB = 96GB < 100GB
-        worker_dashboard_address=False,
-        diagnostics_port=None,
-        silence_logs="WARNING",
+        n_workers=4,              # fewer workers = less overhead
+        threads_per_worker=2,     # parallel per worker
+        memory_limit="20GB",      # use machine RAM effectively
+        processes=True,
+        dashboard_address=":8787",
     )
+
     client = Client(cluster)
     
     dask.config.set(scheduler="distributed")
