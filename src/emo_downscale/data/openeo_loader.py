@@ -257,15 +257,30 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     # 0. Try cached Zarr first
     preds_da, emo1_da = _open_cached_if_available(data_cfg)
     if preds_da is not None and emo1_da is not None:
-        patch_cfg = data_cfg["patch"]
-        patch_y = patch_cfg["size_y"]
-        patch_x = patch_cfg["size_x"]
+        # --- NEW: apply spatial cropping from YAML ---
+        spatial = data_cfg["spatial"]
+        west, east = spatial["west"], spatial["east"]
+        south, north = spatial["south"], spatial["north"]
+        temporal = data_cfg["temporal"]
+        start, end = temporal["start"], temporal["end"]
 
+        
+        # assume dims are ("time", "bands", "lat", "lon")
+        preds_da = preds_da.sel(lat=slice(north, south), lon=slice(west, east))
+        emo1_da  = emo1_da.sel(lat=slice(north, south), lon=slice(west, east))
+
+        preds_da = preds_da.sel(time=slice(start, end))
+        emo1_da = emo1_da.sel(time=slice(start, end))
+        
         preds_da = preds_da.transpose("time", "bands", "lat", "lon")
-        emo1_da = emo1_da.transpose("time", "bands", "lat", "lon")
+        emo1_da  = emo1_da.transpose("time", "bands", "lat", "lon")
 
-        # Rechunk for training here if you want, or let DataModule handle it
-        logger.info("[load] Loaded from cached Zarr.")
+        
+
+        logger.info(
+            "[load] Loaded from cached Zarr + applied spatial crop "
+            f"lat=[{south}, {north}], lon=[{west}, {east}]"
+        )
         return preds_da, emo1_da
 
     # 1. Build from openEO for full temporal range

@@ -3,13 +3,13 @@ seed: 42
 
 data:
   spatial:
-    west: 3    #3
-    east: 18   #18
-    south: 42  #42
-    north: 50  #50
+    west: 9    #3
+    east: 13   #18
+    south: 44  #42
+    north: 48  #50
 
   temporal:
-    start: "2015-01-01"
+    start: "2018-01-01"
     end: "2020-12-31"
 
   bands:
@@ -31,7 +31,7 @@ data:
     stride_x: 64
 
   split:
-    train_years: [2015, 2018]  # inclusive
+    train_years: [2018, 2018]  # inclusive
     val_years:   [2019, 2019]
     test_years:  [2020, 2020]
 
@@ -62,7 +62,7 @@ model:
     activation: "relu"
     dropout: 0.1
     upsample_mode: "bilinear"
-    residual_output: true
+    residual_output: false
 
 trainer:
   max_epochs: 80
@@ -70,9 +70,9 @@ trainer:
   devices: 1
   precision: "16-mixed"
   gradient_clip_val: 1.0
-  batch_size: 8
-  num_workers: 0
-  prefetch_factor: 2     # ← ADD THIS
+  batch_size: 32
+  num_workers: 4
+  prefetch_factor: 4     # ← ADD THIS
 
   optimizer:
     name: "adamw"
