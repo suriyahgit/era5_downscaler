@@ -9,7 +9,7 @@ data:
     north: 48  #50
 
   temporal:
-    start: "2018-01-01"
+    start: "2000-01-01"
     end: "2020-12-31"
 
   bands:
@@ -31,7 +31,7 @@ data:
     stride_x: 64
 
   split:
-    train_years: [2018, 2018]  # inclusive
+    train_years: [2000, 2018]  # inclusive
     val_years:   [2019, 2019]
     test_years:  [2020, 2020]
 
@@ -69,7 +69,7 @@ trainer:
   accelerator: "gpu"
   devices: 1
   gradient_clip_val: 1.0
-  batch_size: 64
+  batch_size: 256
   num_workers: 0
   prefetch_factor: 4     # ← ADD THIS
 
