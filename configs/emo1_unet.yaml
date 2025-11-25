@@ -9,14 +9,14 @@ data:
     north: 50  #50
 
   temporal:
-    start: "2000-01-01"
+    start: "2015-01-01"
     end: "2020-12-31"
 
   bands:
     era5: ["t2m", "ssrd", "tp"]
     pressure: ["t_850"]
     dem: ["dem"]
-    emo1: ["ta24", "pr", "rg"]
+    emo1: ["ta24"]
 
   stac_urls:
     ERA5_T2M_SSRD_TP: "https://stac.intertwin.fedcloud.eu/collections/ERA5_T2M_SSRD_TP"
@@ -43,8 +43,8 @@ data:
   targets_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/targets_cnn"
 
   # new flags
-  use_cached_zarr: false
-  write_cached_zarr: false
+  use_cached_zarr: true
+  write_cached_zarr: false 
 
   predictors_zarr_name: "predictors.zarr"
   targets_zarr_name: "targets.zarr"

@@ -130,8 +130,8 @@ def prepare_year(
     write_chunks = {
         time_dim: data_cfg.get("write_chunk_time", 1),
         bands_dim: 1,
-        lat_dim: data_cfg.get("write_chunk_lat", 180),
-        lon_dim: data_cfg.get("write_chunk_lon", 180),
+        lat_dim: data_cfg.get("write_chunk_lat", 128),
+        lon_dim: data_cfg.get("write_chunk_lon", 128),
     }
     preds_write = preds_da.chunk(write_chunks)
     emo1_write = emo1_da.chunk(write_chunks)
