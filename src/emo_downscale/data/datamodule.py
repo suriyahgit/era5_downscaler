@@ -1,14 +1,15 @@
 # src/emo_downscale/data/datamodule.py
 
 from typing import Any, Dict, Optional
+import os
 
-import numpy as np
 import lightning.pytorch as pl
 from torch.utils.data import DataLoader
-from dask.distributed import get_client
+from dask.distributed import get_client  # still used for lazy mode
+import zarr
 
 from emo_downscale.data.openeo_loader import load_era5_emo1_cubes_from_cache_only
-from emo_downscale.data.datasets import LazyPatchDataset
+from emo_downscale.data.datasets import LazyPatchDataset, ArrayPatchDataset
 from emo_downscale.logging_utils import get_logger
 
 logger = get_logger("datamodule")
@@ -16,15 +17,19 @@ logger = get_logger("datamodule")
 
 class DownscaleDataModule(pl.LightningDataModule):
     """
-    Lightning DataModule for streaming patch-based training data from cached Zarr.
+    Lightning DataModule for ERA5→EMO1 downscaling.
 
-    Design goals:
-    - Use ONLY cached Zarr (no openEO computation paths).
-    - Let Dask handle IO/parallelism, PyTorch just iterates.
-    - Split by year (train/val/test) BEFORE any heavy rechunk/persist.
-    - Rechunk to patch-aligned chunks per split (train/val/test).
-    - Optionally persist TRAIN only, and only when the temporal extent is small
-      enough, to avoid blowing up memory for long runs.
+    Supports two modes:
+
+    1) PATCH-ZARR MODE (preferred if available)
+       - Uses precomputed patch Zarrs written by scripts/prepare_patches.py
+       - train_patches.zarr / val_patches.zarr / test_patches.zarr
+       - Wrapped in ArrayPatchDataset (sample-wise training, no Dask/xarray).
+
+    2) LAZY-ZARR MODE (fallback)
+       - Uses cached year-wise Zarr (predictors_YYYY.zarr / targets_YYYY.zarr)
+       - Streams patches lazily via LazyPatchDataset over xarray/dask.
+       - No precomputed patch Zarrs needed.
     """
 
     def __init__(self, cfg: Dict[str, Any]) -> None:
@@ -37,48 +42,123 @@ class DownscaleDataModule(pl.LightningDataModule):
         self.pin_memory: bool = bool(trainer_cfg.get("pin_memory", False))
         self.drop_last: bool = bool(trainer_cfg.get("drop_last", True))
 
-
         # Internal datasets
-        self._train_ds: Optional[LazyPatchDataset] = None
-        self._val_ds: Optional[LazyPatchDataset] = None
-        self._test_ds: Optional[LazyPatchDataset] = None
+        self._train_ds = None
+        self._val_ds = None
+        self._test_ds = None
 
         self._is_setup: bool = False
+        self._mode: str = "unknown"  # "patch_zarr" or "lazy_zarr"
 
     # ------------------------------------------------------------------
     # Lightning hooks
     # ------------------------------------------------------------------
     def prepare_data(self) -> None:
         """
-        No-op: data is already prepared into cached Zarr by `prepare_zarr.py`.
-
-        All heavy lifting (downloading, openEO processing, Zarr writing) is done
-        outside of the training script. Here we only *open* and stream.
+        No-op: data is already prepared into cached Zarr (prepare_zarr.py)
+        and patch Zarr (prepare_patches.py).
         """
         pass
 
     def setup(self, stage: Optional[str] = None) -> None:
         """
-        Build LazyPatchDataset instances for train/val/test.
+        1. Try PATCH-ZARR MODE:
+           - If data.patch_dir contains train/val/test patch Zarrs,
+             use those with ArrayPatchDataset.
 
-        This method:
-        1. Loads predictors/targets from cached Zarr (cache-only path).
-        2. Ensures canonical dimension order (time, bands, lat, lon).
-        3. Splits by year into train/val/test.
-        4. Rechunks per split (patch-aligned).
-        5. Optionally persists TRAIN only (if configured and small enough).
-        6. Wraps each split in LazyPatchDataset for patch extraction.
+        2. Otherwise, fallback to LAZY-ZARR MODE:
+           - Use cached year-wise Zarr and LazyPatchDataset.
         """
         if self._is_setup:
-            # Lightning may call setup() multiple times; avoid rebuilding
             logger.debug("DownscaleDataModule.setup() called again; skipping.")
             return
 
         data_cfg: Dict[str, Any] = self.cfg["data"]
 
-        # ------------------------------------------------------------------
-        # 1) Load from cache-only loader (no openEO path)
-        # ------------------------------------------------------------------
+        # First preference: patch Zarrs, if present and allowed.
+        if self._maybe_setup_from_patch_zarr(data_cfg):
+            self._mode = "patch_zarr"
+            self._is_setup = True
+            logger.info("[DataModule] Using PATCH-ZARR MODE (ArrayPatchDataset).")
+            return
+
+        # Fallback: lazy patches over cached Zarr
+        self._setup_from_lazy_zarr(data_cfg)
+        self._mode = "lazy_zarr"
+        self._is_setup = True
+        logger.info("[DataModule] Using LAZY-ZARR MODE (LazyPatchDataset).")
+
+    # ------------------------------------------------------------------
+    # MODE 1: Precomputed patch Zarrs → ArrayPatchDataset
+    # ------------------------------------------------------------------
+    def _maybe_setup_from_patch_zarr(self, data_cfg: Dict[str, Any]) -> bool:
+        """
+        Return True if we successfully built datasets from patch Zarrs.
+        Otherwise return False and let caller fall back to lazy mode.
+        """
+        patch_dir = data_cfg.get("patch_dir")
+        use_patches_flag = bool(data_cfg.get("use_patches", True))
+
+        if not patch_dir:
+            logger.info("[DataModule] data.patch_dir not set; cannot use patch Zarrs.")
+            return False
+
+        if not use_patches_flag:
+            logger.info(
+                "[DataModule] data.use_patches=False → skipping patch Zarr mode."
+            )
+            return False
+
+        def store_exists(name: str) -> bool:
+            return os.path.isdir(os.path.join(patch_dir, name))
+
+        expected_stores = [
+            "train_patches.zarr",
+            "val_patches.zarr",
+            "test_patches.zarr",
+        ]
+        if not all(store_exists(s) for s in expected_stores):
+            logger.info(
+                "[DataModule] Not all patch Zarr stores found in patch_dir; "
+                "falling back to lazy Zarr mode.\n"
+                f"  patch_dir={patch_dir}\n"
+                f"  expected={expected_stores}"
+            )
+            return False
+
+        def load_split(name: str):
+            path = os.path.join(patch_dir, f"{name}_patches.zarr")
+            root = zarr.open_group(path, mode="r")
+            X = root["X"]
+            Y = root["Y"]
+            logger.info(
+                f"[PATCH-ZARR] {name}: store={path}, X.shape={X.shape}, Y.shape={Y.shape}"
+            )
+            return X, Y
+
+        X_train, Y_train = load_split("train")
+        X_val, Y_val = load_split("val")
+        X_test, Y_test = load_split("test")
+
+        self._train_ds = ArrayPatchDataset(X_train, Y_train)
+        self._val_ds = ArrayPatchDataset(X_val, Y_val)
+        self._test_ds = ArrayPatchDataset(X_test, Y_test)
+
+        logger.info(
+            "[DataModule] Patch Zarr datasets ready:\n"
+            f"  train=N={len(self._train_ds)}\n"
+            f"  val  =N={len(self._val_ds)}\n"
+            f"  test =N={len(self._test_ds)}"
+        )
+        return True
+
+    # ------------------------------------------------------------------
+    # MODE 2: Lazy grid Zarr → LazyPatchDataset (current behavior)
+    # ------------------------------------------------------------------
+    def _setup_from_lazy_zarr(self, data_cfg: Dict[str, Any]) -> None:
+        """
+        Existing logic: use cached Zarr + LazyPatchDataset.
+        """
         preds_da, targs_da = load_era5_emo1_cubes_from_cache_only(data_cfg)
         if preds_da is None or targs_da is None:
             raise RuntimeError(
@@ -96,9 +176,7 @@ class DownscaleDataModule(pl.LightningDataModule):
             f"  targets:    {targs_da.sizes}"
         )
 
-        # ------------------------------------------------------------------
-        # 2) Split by year BEFORE any rechunk/persist
-        # ------------------------------------------------------------------
+        # --- Split by year ---
         years = preds_da["time"].dt.year.values  # np.ndarray
         split = data_cfg["split"]
 
@@ -126,20 +204,17 @@ class DownscaleDataModule(pl.LightningDataModule):
             f"test={test_preds_da.sizes['time']}"
         )
 
-        # ------------------------------------------------------------------
-        # 3) Rechunk per split with patch-aligned lat/lon
-        # ------------------------------------------------------------------
+        # --- Rechunk per split (patch-aligned) ---
         patch_cfg = data_cfg["patch"]
         patch_h = int(patch_cfg["size_y"])
         patch_w = int(patch_cfg["size_x"])
 
-        # Allow configurable time chunking; fall back to reasonable defaults
         train_chunk_time = int(data_cfg.get("train_chunk_time", 1))
         val_chunk_time = int(data_cfg.get("val_chunk_time", max(4, train_chunk_time)))
         test_chunk_time = int(data_cfg.get("test_chunk_time", val_chunk_time))
 
         train_chunks = {
-            "time": 4,                # bigger chunk = fewer tasks
+            "time": 4,
             "bands": -1,
             "lat": 128,
             "lon": 128,
@@ -171,9 +246,7 @@ class DownscaleDataModule(pl.LightningDataModule):
             f"  test_chunks  = {test_chunks}"
         )
 
-        # ------------------------------------------------------------------
-        # 4) Optionally persist TRAIN only (for small temporal extents)
-        # ------------------------------------------------------------------
+        # --- Optional: persist TRAIN only ---
         persist_train = bool(data_cfg.get("persist_train", False))
         if persist_train:
             T_train = int(train_preds_da.sizes.get("time", 0))
@@ -202,9 +275,7 @@ class DownscaleDataModule(pl.LightningDataModule):
                     "will stream directly from Zarr."
                 )
 
-        # ------------------------------------------------------------------
-        # 5) Wrap into LazyPatchDataset for patch-wise streaming
-        # ------------------------------------------------------------------
+        # --- Wrap into LazyPatchDataset ---
         stride = (int(patch_cfg["stride_y"]), int(patch_cfg["stride_x"]))
         patch_size = (patch_h, patch_w)
 
@@ -225,8 +296,6 @@ class DownscaleDataModule(pl.LightningDataModule):
             f"test={len(self._test_ds)}"
         )
 
-        self._is_setup = True
-
     # ------------------------------------------------------------------
     # Internal helper: common DataLoader kwargs
     # ------------------------------------------------------------------
@@ -234,9 +303,9 @@ class DownscaleDataModule(pl.LightningDataModule):
         """
         Shared DataLoader kwargs.
 
-        - num_workers=0: pure streaming via Dask in the main process (safest).
-        - num_workers>0: a few workers; each will request Dask chunks, so keep
-          this conservative to avoid oversubscribing CPU and RAM.
+        For PATCH-ZARR MODE, feel free to set num_workers>0 in the config.
+        For LAZY-ZARR MODE, num_workers>0 will spawn multiple processes that
+        all talk to Dask; keep it modest.
         """
         kwargs: Dict[str, Any] = dict(
             batch_size=self.batch_size,
@@ -246,7 +315,6 @@ class DownscaleDataModule(pl.LightningDataModule):
         )
 
         if self.num_workers > 0:
-            # Only meaningful when using worker processes
             trainer_cfg = self.cfg.get("trainer", {})
             prefetch_factor = int(trainer_cfg.get("prefetch_factor", 2))
 
@@ -290,7 +358,4 @@ class DownscaleDataModule(pl.LightningDataModule):
         )
 
     def predict_dataloader(self) -> DataLoader:
-        """
-        Optional: use test set as predict set, or adapt as needed.
-        """
         return self.test_dataloader()
