@@ -1,6 +1,6 @@
 [project]
 name = "emo_downscale"
-version = "0.0.1"
+version = "0.0.2"
 description = "ERA5 downscaling framework with openEO and PyTorch"
 authors = [
     { name = "Suriyah Dhinakaran" }
@@ -25,6 +25,10 @@ dependencies = [
     # Misc utilities
     "python-dotenv>=1.0.0",
     "gdal>=3.11,<3.12"
+
+    "dask==2024.7.1",
+    "distributed==2024.7.1",
+    "dask-geopandas==0.4.2"
 ]
 
 [project.optional-dependencies]
