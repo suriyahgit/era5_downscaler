@@ -4,7 +4,9 @@ from torch.utils.data import Dataset
 import xarray as xr
 import numpy as np
 from emo_downscale.logging_utils import get_logger
+
 logger = get_logger("datasets")
+
 
 class LazyPatchDataset(Dataset):
     """
@@ -16,8 +18,8 @@ class LazyPatchDataset(Dataset):
 
     def __init__(
         self,
-        preds_da: xr.DataArray,   # (time, C, lat, lon)
-        targs_da: xr.DataArray,   # (time, C_out, lat, lon)
+        preds_da: xr.DataArray,  # (time, C, lat, lon)
+        targs_da: xr.DataArray,  # (time, C_out, lat, lon)
         patch_size: Tuple[int, int],
         stride: Tuple[int, int],
         dtype: str = "float32",
@@ -42,7 +44,9 @@ class LazyPatchDataset(Dataset):
                     indices.append((t, y0, x0))
 
         if not indices:
-            raise ValueError("No patches extracted — check patch size/stride vs domain size.")
+            raise ValueError(
+                "No patches extracted — check patch size/stride vs domain size."
+            )
 
         self.indices = indices
 
@@ -54,23 +58,19 @@ class LazyPatchDataset(Dataset):
         ph, pw = self.patch_size
 
         # Slice ONE patch lazily; dask computes only this piece
-        pred_patch = (
-            self.preds_da.isel(
-                time=t,
-                lat=slice(y0, y0 + ph),
-                lon=slice(x0, x0 + pw),
-            )
-            .values.astype(self.dtype)  # triggers compute for this patch only
-        )
+        pred_patch = self.preds_da.isel(
+            time=t,
+            lat=slice(y0, y0 + ph),
+            lon=slice(x0, x0 + pw),
+        ).values.astype(
+            self.dtype
+        )  # triggers compute for this patch only
 
-        targ_patch = (
-            self.targs_da.isel(
-                time=t,
-                lat=slice(y0, y0 + ph),
-                lon=slice(x0, x0 + pw),
-            )
-            .values.astype(self.dtype)
-        )
+        targ_patch = self.targs_da.isel(
+            time=t,
+            lat=slice(y0, y0 + ph),
+            lon=slice(x0, x0 + pw),
+        ).values.astype(self.dtype)
 
         # shape: (C, ph, pw)
         x = torch.from_numpy(pred_patch)

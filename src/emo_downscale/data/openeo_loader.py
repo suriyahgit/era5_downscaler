@@ -9,9 +9,11 @@ import copy
 import dask.array as da  # optional, but often handy
 
 from emo_downscale.logging_utils import get_logger
+
 logger = get_logger("openeo_loader")
 
 TIME_CHUNK = 1  # keep patch-aligned
+
 
 def _zarr_paths(data_cfg: Dict) -> Tuple[str, str]:
     pred_dir = data_cfg.get("predictors_feature_dir")
@@ -49,6 +51,7 @@ def _open_cached_if_available(data_cfg: Dict):
 
     return None, None
 
+
 def _load_era5_emo1_core(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     """
     Core loader:
@@ -63,7 +66,9 @@ def _load_era5_emo1_core(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
         client = get_client()
         logger.info(f"[core] Using existing Dask client: {client}")
     except ValueError:
-        logger.warning("[core] No active Dask client found – falling back to default scheduler.")
+        logger.warning(
+            "[core] No active Dask client found – falling back to default scheduler."
+        )
 
     spatial = data_cfg["spatial"]
     temporal = [data_cfg["temporal"]["start"], data_cfg["temporal"]["end"]]
@@ -131,7 +136,7 @@ def _load_era5_emo1_core(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     bands_dim = next(d for d in dims_pred if d not in (time_dim, lat_dim, lon_dim))
 
     predictors_da = predictors_da.transpose(time_dim, bands_dim, lat_dim, lon_dim)
-    emo1_da      = emo1_da.transpose(time_dim, bands_dim, lat_dim, lon_dim)
+    emo1_da = emo1_da.transpose(time_dim, bands_dim, lat_dim, lon_dim)
 
     logger.info(f"[core] Predictors dims after transpose: {predictors_da.dims}")
     logger.info(f"[core] Targets dims after transpose:    {emo1_da.dims}")
@@ -157,7 +162,7 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
         patch_x = patch_cfg["size_x"]
 
         preds_da = preds_da.transpose("time", "bands", "lat", "lon")
-        emo1_da  = emo1_da.transpose("time", "bands", "lat", "lon")
+        emo1_da = emo1_da.transpose("time", "bands", "lat", "lon")
 
         # Rechunk for training here if you want, or let DataModule handle it
         logger.info("[load] Loaded from cached Zarr.")
@@ -176,7 +181,7 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     }
 
     predictors_write = predictors_da.chunk(write_chunks)
-    emo1_write       = emo1_da.chunk(write_chunks)
+    emo1_write = emo1_da.chunk(write_chunks)
     logger.info(f"[load] Using coarse chunks for Zarr write: {write_chunks}")
 
     # 3. Optionally write Zarr cache
@@ -198,4 +203,3 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
             logger.info("[load] Finished writing cached Zarr stores.")
 
     return predictors_da, emo1_da
-

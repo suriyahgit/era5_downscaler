@@ -130,7 +130,9 @@ class Up(nn.Module):
 
         upsample_mode = upsample_mode.lower()
         if upsample_mode == "bilinear":
-            self.upsample = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
+            self.upsample = nn.Upsample(
+                scale_factor=2, mode="bilinear", align_corners=False
+            )
         elif upsample_mode == "nearest":
             self.upsample = nn.Upsample(scale_factor=2, mode="nearest")
         elif upsample_mode == "transposed":
@@ -222,7 +224,7 @@ class UNet(nn.Module):
         # e.g. [in, 64, 128, 256, 512] for num_down_blocks=4, base=64
         enc_channels = [in_channels]
         for i in range(num_down_blocks):
-            enc_channels.append(base_channels * (2 ** i))
+            enc_channels.append(base_channels * (2**i))
 
         for i in range(num_down_blocks):
             self.down_blocks.append(

@@ -5,11 +5,17 @@ from torch import nn
 import lightning.pytorch as pl
 import torch.nn.functional as F
 from emo_downscale.logging_utils import get_logger
+
 logger = get_logger("models.module")
 
 
 class DownscaleLightningModule(pl.LightningModule):
-    def __init__(self, model: nn.Module, optimizer_cfg: Dict[str, Any], scheduler_cfg: Dict[str, Any]):
+    def __init__(
+        self,
+        model: nn.Module,
+        optimizer_cfg: Dict[str, Any],
+        scheduler_cfg: Dict[str, Any],
+    ):
         super().__init__()
         self.model = model
         self.optimizer_cfg = optimizer_cfg

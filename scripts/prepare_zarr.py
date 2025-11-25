@@ -92,9 +92,9 @@ def year_range_from_cfg(data_cfg: Dict[str, Any]) -> range:
     Derive full [start_year, end_year] from the temporal range in config.
     """
     start = data_cfg["temporal"]["start"]
-    end   = data_cfg["temporal"]["end"]
+    end = data_cfg["temporal"]["end"]
     start_year = int(start[:4])
-    end_year   = int(end[:4])
+    end_year = int(end[:4])
     return range(start_year, end_year + 1)
 
 
@@ -114,9 +114,9 @@ def prepare_year(
     data_cfg = copy.deepcopy(base_data_cfg)
     data_cfg["temporal"]["start"] = f"{year}-01-01"
     # include last day by going to Jan 1 of next year
-    data_cfg["temporal"]["end"] = (
-        datetime(year, 12, 31) + timedelta(days=1)
-    ).strftime("%Y-%m-%d")
+    data_cfg["temporal"]["end"] = (datetime(year, 12, 31) + timedelta(days=1)).strftime(
+        "%Y-%m-%d"
+    )
 
     # ensure we don't enter any cached path inside core
     data_cfg["use_cached_zarr"] = False
@@ -134,16 +134,14 @@ def prepare_year(
         lon_dim: data_cfg.get("write_chunk_lon", 180),
     }
     preds_write = preds_da.chunk(write_chunks)
-    emo1_write  = emo1_da.chunk(write_chunks)
+    emo1_write = emo1_da.chunk(write_chunks)
     logger.info(f"Year {year}: write_chunks = {write_chunks}")
 
     # Convert to Dataset
     preds_ds = preds_write.to_dataset(name="predictors")
     targs_ds = emo1_write.to_dataset(name="targets")
 
-    logger.info(
-        f"Year {year}: writing per-year Zarr → {pred_store}, {targ_store}"
-    )
+    logger.info(f"Year {year}: writing per-year Zarr → {pred_store}, {targ_store}")
 
     # always write a fresh store for that year
     preds_ds.to_zarr(pred_store, mode="w", consolidated=True)
@@ -151,6 +149,7 @@ def prepare_year(
 
     del preds_da, emo1_da, preds_write, emo1_write, preds_ds, targs_ds
     import gc
+
     gc.collect()
 
     logger.info(f"Year {year}: finished writing year-specific Zarr.")
@@ -194,11 +193,11 @@ def main():
             year_targ_store = os.path.join(targ_dir, f"{targ_root}_{y}.zarr")
             logger.info(f"Year {y}: predictors store → {year_pred_store}")
             logger.info(f"Year {y}: targets    store → {year_targ_store}")
-        
+
             # soft reset: clear scheduler state + restart workers
             logger.info(f"Restarting Dask cluster before processing year {y}...")
             client.restart()
-        
+
             try:
                 prepare_year(data_cfg, y, year_pred_store, year_targ_store)
             except Exception:

@@ -10,6 +10,7 @@ LOGGER_NAME = "emo_downscale"
 
 def setup_global_logger(run_name: str):
     import warnings
+
     warnings.filterwarnings("default")
 
     os.makedirs("logs", exist_ok=True)

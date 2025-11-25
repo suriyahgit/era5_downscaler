@@ -1,3 +1,17 @@
-# Jupyter notebook checkpoints
-.ipynb_checkpoints/
-*.ipynb_checkpoints/
+# Python cache
+# __pycache__/
+# */__pycache__/
+#
+# # Build / packaging
+# *.egg-info/
+# src/emo_downscale.egg-info/
+#
+# # Jupyter notebook checkpoints
+# .ipynb_checkpoints/
+# **/.ipynb_checkpoints/
+# *.ipynb_checkpoints/
+#
+# # VSCode / IDE caches (optional)
+# .vscode/
+# .idea/
+#

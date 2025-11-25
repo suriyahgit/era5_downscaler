@@ -46,8 +46,8 @@ class DownscaleDataModule(pl.LightningDataModule):
         train_chunks = {
             "time": data_cfg.get("train_chunk_time", 1),
             "bands": -1,
-            "lat":  patch_h,
-            "lon":  patch_w,
+            "lat": patch_h,
+            "lon": patch_w,
         }
 
         preds_da = preds_da.chunk(train_chunks)
@@ -57,24 +57,32 @@ class DownscaleDataModule(pl.LightningDataModule):
         years = predictors_ds["time"].dt.year.values
         split = data_cfg["split"]
 
-        train_mask = (years >= split["train_years"][0]) & (years <= split["train_years"][1])
-        val_mask   = (years >= split["val_years"][0])   & (years <= split["val_years"][1])
-        test_mask  = (years >= split["test_years"][0])  & (years <= split["test_years"][1])
+        train_mask = (years >= split["train_years"][0]) & (
+            years <= split["train_years"][1]
+        )
+        val_mask = (years >= split["val_years"][0]) & (years <= split["val_years"][1])
+        test_mask = (years >= split["test_years"][0]) & (
+            years <= split["test_years"][1]
+        )
 
         train_preds_da = preds_da.isel(time=train_mask)
         train_targs_da = targs_da.isel(time=train_mask)
-        val_preds_da   = preds_da.isel(time=val_mask)
-        val_targs_da   = targs_da.isel(time=val_mask)
-        test_preds_da  = preds_da.isel(time=test_mask)
-        test_targs_da  = targs_da.isel(time=test_mask)
+        val_preds_da = preds_da.isel(time=val_mask)
+        val_targs_da = targs_da.isel(time=val_mask)
+        test_preds_da = preds_da.isel(time=test_mask)
+        test_targs_da = targs_da.isel(time=test_mask)
 
         patch_cfg = data_cfg["patch"]
         patch_size = (patch_cfg["size_y"], patch_cfg["size_x"])
-        stride     = (patch_cfg["stride_y"], patch_cfg["stride_x"])
+        stride = (patch_cfg["stride_y"], patch_cfg["stride_x"])
 
-        self._train_ds = LazyPatchDataset(train_preds_da, train_targs_da, patch_size, stride)
-        self._val_ds   = LazyPatchDataset(val_preds_da,   val_targs_da,   patch_size, stride)
-        self._test_ds  = LazyPatchDataset(test_preds_da,  test_targs_da,  patch_size, stride)
+        self._train_ds = LazyPatchDataset(
+            train_preds_da, train_targs_da, patch_size, stride
+        )
+        self._val_ds = LazyPatchDataset(val_preds_da, val_targs_da, patch_size, stride)
+        self._test_ds = LazyPatchDataset(
+            test_preds_da, test_targs_da, patch_size, stride
+        )
 
         logger.info(
             f"Datasets built: "

@@ -1,6 +1,7 @@
 # src/emo_downscale/train.py
 import logging
 from emo_downscale.logging_utils import setup_global_logger, get_logger
+
 setup_global_logger("startup")  # temporary, will be replaced in main()
 
 import argparse
@@ -43,7 +44,7 @@ def main() -> None:
     cluster = LocalCluster(
         n_workers=14,
         threads_per_worker=1,
-        memory_limit="7GB",          # 16 * 6GB ≈ 96GB < 100GB
+        memory_limit="7GB",  # 16 * 6GB ≈ 96GB < 100GB
         worker_dashboard_address=False,
         diagnostics_port=None,
         silence_logs="WARNING",  # <--- add this
@@ -54,7 +55,7 @@ def main() -> None:
     dask.config.set(scheduler="distributed")
     args = parse_args()
 
-        # ---- Load config FIRST so run_name exists ----
+    # ---- Load config FIRST so run_name exists ----
     cfg: Dict[str, Any] = load_config(args.config)
     run_name = cfg.get("run_name", "downscale_run")
 
@@ -64,7 +65,6 @@ def main() -> None:
     log.debug("Logging reinitialized inside main().")
     log.info("Loaded configuration.")
     log.info(f"Using config file: {args.config}")
-
 
     try:
         pl.seed_everything(cfg.get("seed", 42), workers=True)
