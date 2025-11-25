@@ -149,9 +149,6 @@ def _open_cached_if_available(data_cfg: Dict):
 
     return None, None
 
-
-
-
 def _load_era5_emo1_core(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
     """
     Core loader:
@@ -396,4 +393,48 @@ def _open_yearwise_zarr_if_available(data_cfg: Dict):
         f"shape preds={preds_da.shape}, targs={targs_da.shape}"
     )
     return preds_da, targs_da
+
+def load_era5_emo1_cubes_from_cache_only(
+    data_cfg: Dict,
+) -> Tuple[xr.DataArray, xr.DataArray]:
+    """
+    STRICT cache-only loader for training.
+
+    - Only reads existing Zarr (year-wise or monolithic).
+    - Applies spatial + temporal cropping from YAML.
+    - Never calls openEO / never writes Zarr.
+    - Raises RuntimeError if no cached Zarr is found.
+    """
+    preds_da, emo1_da = _open_cached_if_available(data_cfg)
+
+    # If cached Zarr is disabled or missing, fail hard instead of falling back.
+    if preds_da is None or emo1_da is None:
+        raise RuntimeError(
+            "[cache-only] No cached predictors/targets Zarr found.\n"
+            "  Expected per-year or monolithic Zarr stores based on your "
+            "  predictors_feature_dir / targets_feature_dir in the config.\n"
+            "  Run scripts/prepare_zarr.py first to generate them."
+        )
+
+    spatial = data_cfg["spatial"]
+    west, east = spatial["west"], spatial["east"]
+    south, north = spatial["south"], spatial["north"]
+    temporal = data_cfg["temporal"]
+    start, end = temporal["start"], temporal["end"]
+
+    # assume dims are ("time", "bands", "lat", "lon") coming out of cache 
+    preds_da = preds_da.sel(lat=slice(north, south), lon=slice(west, east))
+    emo1_da  = emo1_da.sel(lat=slice(north, south), lon=slice(west, east))
+
+    preds_da = preds_da.sel(time=slice(start, end))
+    emo1_da  = emo1_da.sel(time=slice(start, end))
+
+    preds_da = preds_da.transpose("time", "bands", "lat", "lon")
+    emo1_da  = emo1_da.transpose("time", "bands", "lat", "lon")
+
+    logger.info(
+        "[cache-only] Loaded from cached Zarr + applied spatial/temporal crop "
+        f"time=[{start}, {end}], lat=[{south}, {north}], lon=[{west}, {east}]"
+    )
+    return preds_da, emo1_da
 

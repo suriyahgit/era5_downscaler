@@ -4,7 +4,7 @@ import numpy as np
 import lightning.pytorch as pl
 from torch.utils.data import DataLoader
 
-from emo_downscale.data.openeo_loader import load_era5_emo1_cubes
+from emo_downscale.data.openeo_loader import load_era5_emo1_cubes_from_cache_only
 from emo_downscale.data.datasets import LazyPatchDataset
 from emo_downscale.logging_utils import get_logger
 
@@ -30,13 +30,14 @@ class DownscaleDataModule(pl.LightningDataModule):
         data_cfg = self.cfg["data"]
         logger.debug(f"Data config: {data_cfg}")
 
-        # 1. load xarray cubes via openeo-processes-dask (dask-backed, lazy)
-        predictors_ds, target_ds = load_era5_emo1_cubes(data_cfg)
-        logger.info("Loaded dask-backed predictors and targets from openEO graph.")
+        # 1. STRICT: load from cached Zarr only (no openEO fallback)
+        preds_da, targs_da = load_era5_emo1_cubes_from_cache_only(data_cfg)
+        logger.info("Loaded predictors/targets from cached Zarr (cache-only mode).")
 
-        # standardize to DataArray: (time, C, Y, X)
-        preds_da = predictors_ds.transpose("time", "bands", "lat", "lon")
-        targs_da = target_ds.transpose("time", "bands", "lat", "lon")
+        # preds_da / targs_da are already (time, bands, lat, lon); transpose is cheap/no-op
+        preds_da = preds_da.transpose("time", "bands", "lat", "lon")
+        targs_da = targs_da.transpose("time", "bands", "lat", "lon")
+
 
         # === Rechunk for training: patch-aligned + time=1 ===
         patch_cfg = data_cfg["patch"]
@@ -54,7 +55,8 @@ class DownscaleDataModule(pl.LightningDataModule):
         targs_da = targs_da.chunk(train_chunks)
         logger.info(f"Rechunked predictors/targets for training: {train_chunks}")
 
-        years = predictors_ds["time"].dt.year.values
+        years = preds_da["time"].dt.year.values
+
         split = data_cfg["split"]
 
         train_mask = (years >= split["train_years"][0]) & (
