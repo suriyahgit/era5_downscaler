@@ -75,8 +75,8 @@ trainer:
   devices: 1
   gradient_clip_val: 1.0
   batch_size: 64
-  num_workers: 0
-  prefetch_factor: 4     # ← ADD THIS
+  num_workers: 8
+  prefetch_factor: 8     # ← ADD THIS
 
   optimizer:
     name: "adamw"
