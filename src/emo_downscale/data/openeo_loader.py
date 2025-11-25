@@ -325,6 +325,12 @@ def _open_yearwise_zarr_if_available(data_cfg: Dict):
     if not base_pred_store or not base_targ_store:
         return None, None
 
+    spatial = data_cfg["spatial"]
+    west, east = spatial["west"], spatial["east"]
+    south, north = spatial["south"], spatial["north"]
+    temporal = data_cfg["temporal"]
+    start, end = temporal["start"], temporal["end"]
+
     pred_dir = os.path.dirname(base_pred_store)
     targ_dir = os.path.dirname(base_targ_store)
 
@@ -384,13 +390,32 @@ def _open_yearwise_zarr_if_available(data_cfg: Dict):
         chunks="auto",
     )
 
+    pred_ds = pred_ds.sel(
+        lat=slice(north, south),
+        lon=slice(west, east)
+    )
+    
+    targ_ds = targ_ds.sel(
+        lat=slice(north, south),
+        lon=slice(west, east)
+    )
+
+    pred_ds = pred_ds.sel(time=slice(start, end))
+    targ_ds  = targ_ds.sel(time=slice(start, end))
+
     # Each store has the same variable name as in prepare_year()
     preds_da = pred_ds["predictors"]
     targs_da = targ_ds["targets"]
 
+
     logger.info(
         "[cache-yearwise] Loaded concatenated predictors/targets: "
         f"shape preds={preds_da.shape}, targs={targs_da.shape}"
+    )
+
+    logger.info(
+        "[cache-only] Loaded from cached Zarr + applied spatial/temporal crop "
+        f"time=[{start}, {end}], lat=[{south}, {north}], lon=[{west}, {east}]"
     )
     return preds_da, targs_da
 
@@ -416,25 +441,21 @@ def load_era5_emo1_cubes_from_cache_only(
             "  Run scripts/prepare_zarr.py first to generate them."
         )
 
-    spatial = data_cfg["spatial"]
-    west, east = spatial["west"], spatial["east"]
-    south, north = spatial["south"], spatial["north"]
-    temporal = data_cfg["temporal"]
-    start, end = temporal["start"], temporal["end"]
+    #spatial = data_cfg["spatial"]
+    #west, east = spatial["west"], spatial["east"]
+    #south, north = spatial["south"], spatial["north"]
+    #emporal = data_cfg["temporal"]
+    #start, end = temporal["start"], temporal["end"]
 
     # assume dims are ("time", "bands", "lat", "lon") coming out of cache 
-    preds_da = preds_da.sel(lat=slice(north, south), lon=slice(west, east))
-    emo1_da  = emo1_da.sel(lat=slice(north, south), lon=slice(west, east))
+    #preds_da = preds_da.sel(lat=slice(north, south), lon=slice(west, east))
+    #emo1_da  = emo1_da.sel(lat=slice(north, south), lon=slice(west, east))
 
-    preds_da = preds_da.sel(time=slice(start, end))
-    emo1_da  = emo1_da.sel(time=slice(start, end))
+    #preds_da = preds_da.sel(time=slice(start, end))
+    #emo1_da  = emo1_da.sel(time=slice(start, end))
 
-    preds_da = preds_da.transpose("time", "bands", "lat", "lon")
-    emo1_da  = emo1_da.transpose("time", "bands", "lat", "lon")
+    #preds_da = preds_da.transpose("time", "bands", "lat", "lon")
+    #emo1_da  = emo1_da.transpose("time", "bands", "lat", "lon")
 
-    logger.info(
-        "[cache-only] Loaded from cached Zarr + applied spatial/temporal crop "
-        f"time=[{start}, {end}], lat=[{south}, {north}], lon=[{west}, {east}]"
-    )
     return preds_da, emo1_da
 

@@ -10,16 +10,18 @@ logger = get_logger("datasets")
 
 class LazyPatchDataset(Dataset):
     """
-    Dataset that:
-      - keeps predictors/targets as xarray DataArray (dask-backed)
-      - stores only (time, y0, x0) indices
-      - extracts and computes ONE patch per __getitem__
+    Efficient Dask-backed patch extractor:
+
+    - No global preload
+    - One patch computed per __getitem__
+    - Zero-cost indexing (math-based, no huge index lists)
+    - No .values() (safer for Dask)
     """
 
     def __init__(
         self,
-        preds_da: xr.DataArray,  # (time, C, lat, lon)
-        targs_da: xr.DataArray,  # (time, C_out, lat, lon)
+        preds_da: xr.DataArray,   # (time, bands, lat, lon)
+        targs_da: xr.DataArray,   # (time, bands, lat, lon)
         patch_size: Tuple[int, int],
         stride: Tuple[int, int],
         dtype: str = "float32",
@@ -37,42 +39,54 @@ class LazyPatchDataset(Dataset):
         ph, pw = patch_size
         sy, sx = stride
 
-        indices: List[Tuple[int, int, int]] = []
-        for t in range(T):
-            for y0 in range(0, Y - ph + 1, sy):
-                for x0 in range(0, X - pw + 1, sx):
-                    indices.append((t, y0, x0))
+        self.T = T
+        self.Y = Y
+        self.X = X
+        self.ph = ph
+        self.pw = pw
+        self.sy = sy
+        self.sx = sx
 
-        if not indices:
-            raise ValueError(
-                "No patches extracted — check patch size/stride vs domain size."
-            )
+        # compute grid sizes mathematically
+        self.ny = 1 + (Y - ph) // sy
+        self.nx = 1 + (X - pw) // sx
+        self.samples_per_t = self.ny * self.nx
+        self.total_samples = T * self.samples_per_t
 
-        self.indices = indices
+    def __len__(self):
+        return self.total_samples
 
-    def __len__(self) -> int:
-        return len(self.indices)
+    def _decode_index(self, idx):
+        """Convert linear idx → (t, y0, x0). No list stored."""
+        t = idx // self.samples_per_t
+        rem = idx % self.samples_per_t
 
-    def __getitem__(self, idx: int):
-        t, y0, x0 = self.indices[idx]
+        y_idx = rem // self.nx
+        x_idx = rem % self.nx
+
+        y0 = y_idx * self.sy
+        x0 = x_idx * self.sx
+        return t, y0, x0
+
+    def __getitem__(self, idx):
+        t, y0, x0 = self._decode_index(idx)
         ph, pw = self.patch_size
 
-        # Slice ONE patch lazily; dask computes only this piece
-        pred_patch = self.preds_da.isel(
+        # lazy slice
+        pred_arr = self.preds_da.isel(
             time=t,
             lat=slice(y0, y0 + ph),
             lon=slice(x0, x0 + pw),
-        ).values.astype(
-            self.dtype
-        )  # triggers compute for this patch only
+        )
 
-        targ_patch = self.targs_da.isel(
+        targ_arr = self.targs_da.isel(
             time=t,
             lat=slice(y0, y0 + ph),
             lon=slice(x0, x0 + pw),
-        ).values.astype(self.dtype)
+        )
 
-        # shape: (C, ph, pw)
-        x = torch.from_numpy(pred_patch)
-        y = torch.from_numpy(targ_patch)
+        # compute only this patch
+        x = torch.as_tensor(pred_arr.compute(), dtype=torch.float32)
+        y = torch.as_tensor(targ_arr.compute(), dtype=torch.float32)
+
         return x, y

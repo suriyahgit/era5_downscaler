@@ -49,6 +49,8 @@ data:
   predictors_zarr_name: "predictors.zarr"
   targets_zarr_name: "targets.zarr"
 
+  persist_max_time: 365
+
 model:
   name: "unet"
   params:
