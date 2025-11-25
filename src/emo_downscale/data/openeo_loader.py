@@ -10,6 +10,10 @@ import dask.array as da  # optional, but often handy
 
 from emo_downscale.logging_utils import get_logger
 
+# src/emo_downscale/data/openeo_loader.py
+import glob
+import re
+
 logger = get_logger("openeo_loader")
 
 TIME_CHUNK = 1  # keep patch-aligned
@@ -25,12 +29,103 @@ def _zarr_paths(data_cfg: Dict) -> Tuple[str, str]:
     targ_store = os.path.join(targ_dir, targ_name) if targ_dir else None
     return pred_store, targ_store
 
+def _select_and_validate_bands(preds_da: xr.DataArray,
+                               targs_da: xr.DataArray,
+                               data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
+    """
+    Select only the relevant bands from predictors/targets according to data_cfg["bands"],
+    then assert that all required bands are present and ordered as in the config.
+    """
+    bands_cfg = data_cfg.get("bands", {})
+
+    # expected predictors bands: era5 + pressure + dem
+    expected_pred_bands = (
+        bands_cfg.get("era5", [])
+        + bands_cfg.get("pressure", [])
+        + bands_cfg.get("dem", [])
+    )
+    # expected targets bands: emo1
+    expected_targ_bands = bands_cfg.get("emo1", [])
+
+    # --- Sanity: predictors must have "bands" coord ---
+    if "bands" not in preds_da.coords:
+        raise AssertionError(
+            "[ZARR ERROR] Predictors DataArray has no 'bands' coordinate; "
+            "cannot map ERA5/pressure/DEM features."
+        )
+
+    if "bands" not in targs_da.coords:
+        raise AssertionError(
+            "[ZARR ERROR] Targets DataArray has no 'bands' coordinate; "
+            "cannot map EMO1 features."
+        )
+
+    # --- First: select only relevant bands (this drops any extras) ---
+    # If some bands are missing, .sel will raise KeyError; we catch and rephrase.
+    try:
+        preds_da_sel = preds_da.sel(bands=expected_pred_bands)
+    except KeyError:
+        available = list(preds_da.coords["bands"].values)
+        missing = sorted(set(expected_pred_bands) - set(available))
+        raise AssertionError(
+            "[ZARR ERROR] Missing predictor bands in cached Zarr.\n"
+            f"  Expected (from YAML): {expected_pred_bands}\n"
+            f"  Available in Zarr:    {available}\n"
+            f"  Missing:              {missing}"
+        )
+
+    try:
+        targs_da_sel = targs_da.sel(bands=expected_targ_bands)
+    except KeyError:
+        available = list(targs_da.coords["bands"].values)
+        missing = sorted(set(expected_targ_bands) - set(available))
+        raise AssertionError(
+            "[ZARR ERROR] Missing target bands in cached Zarr.\n"
+            f"  Expected (from YAML): {expected_targ_bands}\n"
+            f"  Available in Zarr:    {available}\n"
+            f"  Missing:              {missing}"
+        )
+
+    # --- Then: assert that the selected bands match exactly the config order ---
+    pred_selected = list(preds_da_sel.coords["bands"].values)
+    targ_selected = list(targs_da_sel.coords["bands"].values)
+
+    assert pred_selected == expected_pred_bands, (
+        "[ZARR ERROR] Predictor bands order/content mismatch after selection.\n"
+        f"  Expected (from YAML): {expected_pred_bands}\n"
+        f"  Selected from Zarr:   {pred_selected}"
+    )
+
+    assert targ_selected == expected_targ_bands, (
+        "[ZARR ERROR] Target bands order/content mismatch after selection.\n"
+        f"  Expected (from YAML): {expected_targ_bands}\n"
+        f"  Selected from Zarr:   {targ_selected}"
+    )
+
+    logger.info(
+        "[load] Zarr band verification passed.\n"
+        f"  Predictors bands: {pred_selected}\n"
+        f"  Targets bands:    {targ_selected}"
+    )
+
+    return preds_da_sel, targs_da_sel
+
+
 
 def _open_cached_if_available(data_cfg: Dict):
     use_cached = data_cfg.get("use_cached_zarr", False)
     if not use_cached:
         return None, None
 
+    # 1) Try year-wise Zarrs first (if you already implemented that)
+    preds_da, targs_da = _open_yearwise_zarr_if_available(data_cfg)
+    if preds_da is not None and targs_da is not None:
+        # IMPORTANT: also restrict + validate bands here
+        preds_da, targs_da = _select_and_validate_bands(preds_da, targs_da, data_cfg)
+        logger.info("[load] Using year-wise cached Zarr (open_mfdataset).")
+        return preds_da, targs_da
+
+    # 2) Fallback to single monolithic Zarr (old behavior)
     pred_store, targ_store = _zarr_paths(data_cfg)
     if not (pred_store and targ_store):
         return None, None
@@ -42,14 +137,19 @@ def _open_cached_if_available(data_cfg: Dict):
         pred_ds = xr.open_zarr(pred_store, consolidated=True)
         targ_ds = xr.open_zarr(targ_store, consolidated=True)
 
-        # expect single-variable datasets named "predictors"/"targets"
+        # Get the underlying DataArrays (likely 'predictors' and 'targets')
         preds_da = pred_ds[list(pred_ds.data_vars)[0]]
         targs_da = targ_ds[list(targ_ds.data_vars)[0]]
+
+        # ✅ Select only relevant bands THEN assert
+        preds_da, targs_da = _select_and_validate_bands(preds_da, targs_da, data_cfg)
 
         logger.info("Loaded cached predictors/targets Zarr successfully.")
         return preds_da, targs_da
 
     return None, None
+
+
 
 
 def _load_era5_emo1_core(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
@@ -203,3 +303,82 @@ def load_era5_emo1_cubes(data_cfg: Dict) -> Tuple[xr.DataArray, xr.DataArray]:
             logger.info("[load] Finished writing cached Zarr stores.")
 
     return predictors_da, emo1_da
+
+def _open_yearwise_zarr_if_available(data_cfg: Dict):
+    """
+    If per-year Zarr stores exist (predictors_<year>.zarr / targets_<year>.zarr),
+    open them with xarray.open_mfdataset and return concatenated DataArrays.
+    """
+    base_pred_store, base_targ_store = _zarr_paths(data_cfg)
+    if not base_pred_store or not base_targ_store:
+        return None, None
+
+    pred_dir = os.path.dirname(base_pred_store)
+    targ_dir = os.path.dirname(base_targ_store)
+
+    pred_base = os.path.basename(base_pred_store)  # e.g. "predictors.zarr"
+    targ_base = os.path.basename(base_targ_store)  # e.g. "targets.zarr"
+
+    pred_root = pred_base[:-5] if pred_base.endswith(".zarr") else pred_base
+    targ_root = targ_base[:-5] if targ_base.endswith(".zarr") else targ_base
+
+    pred_pattern = os.path.join(pred_dir, f"{pred_root}_*.zarr")
+    targ_pattern = os.path.join(targ_dir, f"{targ_root}_*.zarr")
+
+    pred_paths = sorted(glob.glob(pred_pattern))
+    targ_paths = sorted(glob.glob(targ_pattern))
+
+    if not pred_paths or not targ_paths:
+        logger.info("[cache-yearwise] No per-year Zarr stores found.")
+        return None, None
+
+    # Optionally: enforce same years on both sides
+    year_re = re.compile(r".*_(\d{4})\.zarr$")
+    def years_from_paths(paths):
+        out = {}
+        for p in paths:
+            m = year_re.match(p)
+            if m:
+                out[int(m.group(1))] = p
+        return out
+
+    pred_years = years_from_paths(pred_paths)
+    targ_years = years_from_paths(targ_paths)
+    common_years = sorted(set(pred_years) & set(targ_years))
+    if not common_years:
+        logger.warning("[cache-yearwise] No overlapping years between predictors/targets.")
+        return None, None
+
+    pred_paths_sorted = [pred_years[y] for y in common_years]
+    targ_paths_sorted = [targ_years[y] for y in common_years]
+
+    logger.info(f"[cache-yearwise] Opening predictors Zarr for years: {common_years}")
+    pred_ds = xr.open_mfdataset(
+        pred_paths_sorted,
+        engine="zarr",
+        concat_dim="time",
+        combine="nested",
+        parallel=True,
+        chunks="auto",  # keep on-disk chunking (already patch-aligned)
+    )
+
+    logger.info(f"[cache-yearwise] Opening targets Zarr for years: {common_years}")
+    targ_ds = xr.open_mfdataset(
+        targ_paths_sorted,
+        engine="zarr",
+        concat_dim="time",
+        combine="nested",
+        parallel=True,
+        chunks="auto",
+    )
+
+    # Each store has the same variable name as in prepare_year()
+    preds_da = pred_ds["predictors"]
+    targs_da = targ_ds["targets"]
+
+    logger.info(
+        "[cache-yearwise] Loaded concatenated predictors/targets: "
+        f"shape preds={preds_da.shape}, targs={targs_da.shape}"
+    )
+    return preds_da, targs_da
+
