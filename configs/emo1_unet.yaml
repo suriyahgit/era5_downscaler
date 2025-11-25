@@ -68,10 +68,9 @@ trainer:
   max_epochs: 80
   accelerator: "gpu"
   devices: 1
-  precision: "16-mixed"
   gradient_clip_val: 1.0
-  batch_size: 32
-  num_workers: 4
+  batch_size: 64
+  num_workers: 0
   prefetch_factor: 4     # ← ADD THIS
 
   optimizer:

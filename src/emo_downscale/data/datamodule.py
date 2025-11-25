@@ -7,9 +7,9 @@ from torch.utils.data import DataLoader
 from emo_downscale.data.openeo_loader import load_era5_emo1_cubes_from_cache_only
 from emo_downscale.data.datasets import LazyPatchDataset
 from emo_downscale.logging_utils import get_logger
+from dask.distributed import get_client
 
 logger = get_logger("datamodule")
-
 
 class DownscaleDataModule(pl.LightningDataModule):
     def __init__(self, cfg: Dict[str, Any]):
@@ -54,6 +54,16 @@ class DownscaleDataModule(pl.LightningDataModule):
         preds_da = preds_da.chunk(train_chunks)
         targs_da = targs_da.chunk(train_chunks)
         logger.info(f"Rechunked predictors/targets for training: {train_chunks}")
+
+        # NEW: persist rechunked arrays into the Dask cluster
+        try:
+            client = get_client()
+            logger.info("Persisting training arrays on Dask cluster...")
+            preds_da = preds_da.persist()
+            targs_da = targs_da.persist()
+            logger.info("Persist completed.")
+        except Exception as e:
+            logger.warning(f"Could not persist on Dask client (falling back): {e}")
 
         years = preds_da["time"].dt.year.values
 

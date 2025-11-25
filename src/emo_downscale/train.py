@@ -41,15 +41,21 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     # 16 cores → 16 workers × 1 thread each
+    # src/emo_downscale/train.py
+
     cluster = LocalCluster(
-        n_workers=14,
+        n_workers=16,             # one worker per core
         threads_per_worker=1,
-        memory_limit="7GB",  # 16 * 6GB ≈ 96GB < 100GB
+        memory_limit="6GB",       # 16 * 6GB = 96GB < 100GB
         worker_dashboard_address=False,
         diagnostics_port=None,
-        silence_logs="WARNING",  # <--- add this
+        silence_logs="WARNING",
     )
     client = Client(cluster)
+    
+    dask.config.set(scheduler="distributed")
+
+    scheduler_address = client.scheduler.address
 
     # Make sure everyone (including openEO) uses this cluster
     dask.config.set(scheduler="distributed")
@@ -113,7 +119,6 @@ def main() -> None:
             max_epochs=trainer_cfg["max_epochs"],
             accelerator=trainer_cfg["accelerator"],
             devices=trainer_cfg["devices"],
-            precision=trainer_cfg["precision"],
             logger=mlflow_logger,
             callbacks=[ckpt_cb, es_cb],
             gradient_clip_val=trainer_cfg["gradient_clip_val"],
