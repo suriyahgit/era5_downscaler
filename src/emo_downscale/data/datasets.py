@@ -1,142 +1,188 @@
-# src/emo_downscale/data/datamodule.py
+# src/emo_downscale/data/datasets.py
 
-from typing import Any, Dict, Optional
+from __future__ import annotations
+
+from typing import Tuple
 
 import numpy as np
-import zarr
-import lightning.pytorch as pl
-from torch.utils.data import DataLoader
+import torch
+from torch.utils.data import Dataset
+import xarray as xr
 
-from emo_downscale.data.datasets import ArrayPatchDataset
 from emo_downscale.logging_utils import get_logger
 
-logger = get_logger("datamodule")
+logger = get_logger("data.datasets")
 
 
-def _load_zarr_patches(store_path: str):
-    logger.info(f"[DataModule] Opening patch Zarr store: {store_path}")
-    root = zarr.open_group(store_path, mode="r")
-
-    X_z = root["X"]
-    Y_z = root["Y"]
-
-    logger.info(
-        f"[DataModule] Found datasets: X.shape={X_z.shape}, Y.shape={Y_z.shape}, "
-        f"X.chunks={X_z.chunks}, Y.chunks={Y_z.chunks}"
-    )
-
-    # Load fully into memory (you have ~100 GB; this is ~10–12 GB for train)
-    X = np.asarray(X_z, dtype=np.float32)
-    Y = np.asarray(Y_z, dtype=np.float32)
-
-    logger.info(
-        f"[DataModule] Loaded into memory: X.shape={X.shape}, Y.shape={Y.shape}, "
-        f"dtype={X.dtype}"
-    )
-
-    return X, Y
-
-
-class DownscaleDataModule(pl.LightningDataModule):
+# ---------------------------------------------------------------------
+# 1) ArrayPatchDataset  (for fully in-memory numpy arrays: X, Y)
+# ---------------------------------------------------------------------
+class ArrayPatchDataset(Dataset):
     """
-    Lightning DataModule using *precomputed patch Zarrs*.
+    Simple dataset for pre-extracted patch tensors stored as numpy arrays.
 
-    Workflow:
-      1. Run scripts/prepare_patches.py once to create:
-         - <patch_dir>/train_patches.zarr
-         - <patch_dir>/val_patches.zarr
-         - <patch_dir>/test_patches.zarr
-
-      2. This DataModule:
-         - loads each split's X/Y into memory
-         - wraps them with ArrayPatchDataset
-         - returns standard PyTorch DataLoaders
+    X: (N, Cx, H, W)
+    Y: (N, Cy, H, W)
     """
 
-    def __init__(self, cfg: Dict[str, Any]) -> None:
-        super().__init__()
-        self.cfg = cfg
-
-        trainer_cfg = cfg.get("trainer", {})
-        self.batch_size: int = int(trainer_cfg.get("batch_size", 8))
-        self.num_workers: int = int(trainer_cfg.get("num_workers", 4))
-        self.pin_memory: bool = True
-        self.drop_last: bool = True
-
-        data_cfg = cfg["data"]
-        self.patch_dir: str = data_cfg.get("patch_dir", "")
-        if not self.patch_dir:
+    def __init__(self, X: np.ndarray, Y: np.ndarray):
+        if X.shape[0] != Y.shape[0]:
             raise ValueError(
-                "Config must define data.patch_dir pointing to the patch Zarr directory."
+                f"ArrayPatchDataset: X and Y must have same first dim. "
+                f"Got X.shape={X.shape}, Y.shape={Y.shape}"
             )
-
-        self._train_ds: Optional[ArrayPatchDataset] = None
-        self._val_ds: Optional[ArrayPatchDataset] = None
-        self._test_ds: Optional[ArrayPatchDataset] = None
-
-    # ------------------------------------------------------------------ #
-    # Lightning hooks
-    # ------------------------------------------------------------------ #
-    def prepare_data(self) -> None:
-        """
-        No-op: patch Zarrs must already exist (prepared by scripts/prepare_patches.py).
-        """
-        logger.info("[DataModule] prepare_data(): expecting patch Zarrs to already exist.")
-
-    def setup(self, stage: Optional[str] = None) -> None:
-        if self._train_ds is not None and self._val_ds is not None and self._test_ds is not None:
-            return  # already set up
-
-        logger.info("[DataModule] setup(stage=%s)", stage)
-
-        train_store = f"{self.patch_dir}/train_patches.zarr"
-        val_store = f"{self.patch_dir}/val_patches.zarr"
-        test_store = f"{self.patch_dir}/test_patches.zarr"
-
-        X_train, Y_train = _load_zarr_patches(train_store)
-        X_val, Y_val = _load_zarr_patches(val_store)
-        X_test, Y_test = _load_zarr_patches(test_store)
-
-        self._train_ds = ArrayPatchDataset(X_train, Y_train)
-        self._val_ds = ArrayPatchDataset(X_val, Y_val)
-        self._test_ds = ArrayPatchDataset(X_test, Y_test)
+        self.X = X
+        self.Y = Y
 
         logger.info(
-            "[DataModule] Dataset sizes (patches): train=%d, val=%d, test=%d",
-            len(self._train_ds),
-            len(self._val_ds),
-            len(self._test_ds),
+            "ArrayPatchDataset initialized: "
+            f"N={self.X.shape[0]}, "
+            f"X.shape={self.X.shape}, Y.shape={self.Y.shape}"
         )
 
-    # ------------------------------------------------------------------ #
-    # DataLoaders
-    # ------------------------------------------------------------------ #
-    def train_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self._train_ds,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            drop_last=self.drop_last,
+    def __len__(self) -> int:
+        return self.X.shape[0]
+
+    def __getitem__(self, idx: int):
+        x = torch.from_numpy(self.X[idx]).float()
+        y = torch.from_numpy(self.Y[idx]).float()
+        return x, y
+
+
+# ---------------------------------------------------------------------
+# 2) LazyPatchDataset  (for Dask/xarray-backed cubes: time, bands, lat, lon)
+# ---------------------------------------------------------------------
+class LazyPatchDataset(Dataset):
+    """
+    Patch-wise dataset that lazily extracts patches from xarray.DataArray
+    objects backed by Dask / Zarr.
+
+    predictors_da: (time, bands, lat, lon)
+    targets_da:    (time, bands, lat, lon)
+
+    We never materialize all patches at once; each __getitem__ computes
+    exactly one patch via xarray indexing → dask → numpy → torch.
+    """
+
+    def __init__(
+        self,
+        predictors_da: xr.DataArray,
+        targets_da: xr.DataArray,
+        patch_size: Tuple[int, int],
+        stride: Tuple[int, int],
+    ):
+        # Basic checks
+        if predictors_da.dims != ("time", "bands", "lat", "lon"):
+            raise ValueError(
+                f"LazyPatchDataset expects predictors dims ('time','bands','lat','lon'), "
+                f"got {predictors_da.dims}"
+            )
+        if targets_da.dims != ("time", "bands", "lat", "lon"):
+            raise ValueError(
+                f"LazyPatchDataset expects targets dims ('time','bands','lat','lon'), "
+                f"got {targets_da.dims}"
+            )
+
+        if predictors_da.sizes["time"] != targets_da.sizes["time"]:
+            raise ValueError("Predictors and targets must have same time length.")
+        if predictors_da.sizes["lat"] != targets_da.sizes["lat"]:
+            raise ValueError("Predictors and targets must have same lat size.")
+        if predictors_da.sizes["lon"] != targets_da.sizes["lon"]:
+            raise ValueError("Predictors and targets must have same lon size.")
+
+        self.predictors = predictors_da
+        self.targets = targets_da
+
+        self.patch_h, self.patch_w = map(int, patch_size)
+        self.stride_y, self.stride_x = map(int, stride)
+
+        self.T = int(predictors_da.sizes["time"])
+        self.Cx = int(predictors_da.sizes["bands"])
+        self.Cy = int(targets_da.sizes["bands"])
+        self.H = int(predictors_da.sizes["lat"])
+        self.W = int(predictors_da.sizes["lon"])
+
+        if self.patch_h > self.H or self.patch_w > self.W:
+            raise ValueError(
+                f"Patch size ({self.patch_h}, {self.patch_w}) larger than domain "
+                f"(H={self.H}, W={self.W})."
+            )
+
+        # Compute patch grid per time slice
+        self.ny = 1 + (self.H - self.patch_h) // self.stride_y
+        self.nx = 1 + (self.W - self.patch_w) // self.stride_x
+
+        if self.ny <= 0 or self.nx <= 0:
+            raise ValueError(
+                "No patches can be formed with given patch_size/stride "
+                f"on domain (H={self.H}, W={self.W}). Got ny={self.ny}, nx={self.nx}."
+            )
+
+        self.patches_per_t = self.ny * self.nx
+        self.N = self.T * self.patches_per_t
+
+        logger.info(
+            "LazyPatchDataset initialized:\n"
+            f"  predictors: time={self.T}, bands={self.Cx}, H={self.H}, W={self.W}\n"
+            f"  targets:    time={self.T}, bands={self.Cy}, H={self.H}, W={self.W}\n"
+            f"  patch_size=({self.patch_h},{self.patch_w}), "
+            f"stride=({self.stride_y},{self.stride_x})\n"
+            f"  grid: ny={self.ny}, nx={self.nx}, patches_per_t={self.patches_per_t}\n"
+            f"  total patches N={self.N}"
         )
 
-    def val_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self._val_ds,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            drop_last=False,
+    def __len__(self) -> int:
+        return self.N
+
+    def _index_to_coords(self, idx: int):
+        """
+        Map a flat index [0, N) to (t, y0, x0) in the original grid.
+        """
+        if idx < 0 or idx >= self.N:
+            raise IndexError(f"Index {idx} out of range [0, {self.N}).")
+
+        t = idx // self.patches_per_t
+        rem = idx % self.patches_per_t
+        iy = rem // self.nx
+        ix = rem % self.nx
+
+        y0 = iy * self.stride_y
+        x0 = ix * self.stride_x
+
+        return t, y0, x0
+
+    def __getitem__(self, idx: int):
+        t, y0, x0 = self._index_to_coords(idx)
+
+        y1 = y0 + self.patch_h
+        x1 = x0 + self.patch_w
+
+        # xarray indexing: still Dask-backed, compute only this slice
+        x_da = self.predictors.isel(
+            time=t,
+            bands=slice(None),
+            lat=slice(y0, y1),
+            lon=slice(x0, x1),
+        )
+        y_da = self.targets.isel(
+            time=t,
+            bands=slice(None),
+            lat=slice(y0, y1),
+            lon=slice(x0, x1),
         )
 
-    def test_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self._test_ds,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            drop_last=False,
-        )
+        # Compute to numpy (patch-sized only), then to torch tensors
+        x_np = np.asarray(x_da.data, dtype=np.float32)
+        y_np = np.asarray(y_da.data, dtype=np.float32)
+
+        # Ensure shape (C, H, W)
+        # x_da shape is (bands, lat, lon) after isel on time
+        if x_np.ndim != 3:
+            raise RuntimeError(f"Expected x_np.ndim==3, got {x_np.ndim}")
+        if y_np.ndim != 3:
+            raise RuntimeError(f"Expected y_np.ndim==3, got {y_np.ndim}")
+
+        x = torch.from_numpy(x_np)
+        y = torch.from_numpy(y_np)
+
+        return x, y
