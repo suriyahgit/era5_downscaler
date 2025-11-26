@@ -2,16 +2,41 @@ run_name: "unet_emo1_alps"
 seed: 42
 
 dask:
-  num_workers: 8
-  threads_per_worker: 1
-  memory_limit: "12GB"
+  train:
+    # Cluster
+    num_workers: 4
+    threads_per_worker: 2
+    memory_limit: "24GB"
+    processes: true
+    dashboard_address: ":8787"
+
+    # Runtime config (what you previously set with dask.config.set)
+    config:
+      scheduler: "distributed"
+      distributed.worker.memory.target: 0.95
+      distributed.worker.memory.spill: false
+      distributed.worker.profile: false
+      distributed.scheduler.work-stealing: true
+
+  prepare_zarr:
+    # Cluster
+    num_workers: 4
+    threads_per_worker: 2
+    memory_limit: "20GB"
+    processes: true
+    dashboard_address: ":5054"
+    diagnostics_port: 5055
+
+    # Runtime config – can be same or different from train
+    config:
+      scheduler: "distributed"
 
 data:
   spatial:
-    west: 3    #3
-    east: 18    #18
-    south: 42  #42
-    north: 50  #50
+    west: 9    #3
+    east: 13    #18
+    south: 44  #42
+    north: 48  #50
 
   temporal:
     start: "2000-01-01"
@@ -40,12 +65,12 @@ data:
     val_years:   [2019, 2019]
     test_years:  [2020, 2020]
 
-  write_chunk_time: 365
-  write_chunk_lat: 1
-  write_chunk_lon: 1
+  write_chunk_time: 1
+  write_chunk_lat: 128
+  write_chunk_lon: 128
 
-  predictors_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v3/gridcell_features"
-  targets_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v3/gridcell_targets"
+  predictors_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/features_cnn"
+  targets_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/targets_cnn"
 
   # new flags
   use_cached_zarr: false

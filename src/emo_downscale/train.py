@@ -40,41 +40,44 @@ def parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
+def _build_train_dask_client(dask_root: Dict[str, Any]) -> Client:
+    train_cfg = dask_root.get("train", {})
 
-def main() -> None:
     cluster = LocalCluster(
-        n_workers=4,
-        threads_per_worker=2,
-        memory_limit="20GB",
-        processes=True,
-        dashboard_address=":8787",
+        n_workers=int(train_cfg.get("num_workers", 4)),
+        threads_per_worker=int(train_cfg.get("threads_per_worker", 2)),
+        memory_limit=train_cfg.get("memory_limit", "20GB"),
+        processes=bool(train_cfg.get("processes", True)),
+        dashboard_address=train_cfg.get("dashboard_address", ":8787"),
     )
 
     client = Client(cluster)
 
-    # Make sure we use this scheduler
-    dask.config.set(scheduler="distributed")
+    # Apply runtime config if provided
+    runtime_cfg = train_cfg.get("config", {})
+    if runtime_cfg:
+        dask.config.set(runtime_cfg)
 
-    # IO / memory tuning lives HERE (after client exists)
-    dask.config.set({
-        "distributed.worker.memory.target": 0.95,
-        "distributed.worker.memory.spill": False,
-        "distributed.worker.profile": False,
-        "distributed.scheduler.work-stealing": True,
-    })
+    return client
 
+
+def main() -> None:
     args = parse_args()
 
-    # ---- Load config FIRST so run_name exists ----
+    # Load config FIRST
     cfg: Dict[str, Any] = load_config(args.config)
     run_name = cfg.get("run_name", "downscale_run")
 
-    # ---- Initialize project-wide logger (root + project) ----
+    # Init logging
     setup_global_logger(run_name)
     log = logging.getLogger("emo_downscale.train")
     log.debug("Logging reinitialized inside main().")
     log.info("Loaded configuration.")
     log.info(f"Using config file: {args.config}")
+
+    # Build Dask client for training from YAML
+    dask_root = cfg.get("dask", {})
+    client = _build_train_dask_client(dask_root)
 
     try:
         pl.seed_everything(cfg.get("seed", 42), workers=True)

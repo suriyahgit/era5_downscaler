@@ -66,22 +66,28 @@ def dump_dask_state(client: Client, log=logger, prefix: str = "[DASK DEBUG]") ->
         log.error(f"{prefix} Failed to dump Dask state: {e}", exc_info=True)
 
 
-def build_cluster() -> Client:
+def build_cluster(dask_root: Dict[str, Any]) -> Client:
     """
-    Use a similar cluster to train.py, but dedicated to data prep.
+    Use a cluster configured via dask.prepare_zarr in the YAML.
     """
+    prep_cfg = dask_root.get("prepare_zarr", {})
+
     cluster = LocalCluster(
-        n_workers=8,
-        threads_per_worker=1,
-        memory_limit="12GB",
-        # for debugging, turn ON dashboard instead of hiding it
-        dashboard_address=":5054",
-        diagnostics_port=5055,
+        n_workers=int(prep_cfg.get("num_workers", 8)),
+        threads_per_worker=int(prep_cfg.get("threads_per_worker", 1)),
+        memory_limit=prep_cfg.get("memory_limit", "12GB"),
+        dashboard_address=prep_cfg.get("dashboard_address", ":5054"),
+        diagnostics_port=int(prep_cfg.get("diagnostics_port", 5055)),
+        processes=bool(prep_cfg.get("processes", True)),
         silence_logs="WARNING",
     )
     client = Client(cluster)
-    # ensure dask uses this
-    dask.config.set(scheduler="distributed")
+
+    # Apply runtime config if provided
+    runtime_cfg = prep_cfg.get("config", {})
+    if runtime_cfg:
+        dask.config.set(runtime_cfg)
+
     logger.info(f"Started LocalCluster for data prep: {client}")
     logger.info(f"Dask dashboard at {cluster.dashboard_link}")
     return client
@@ -162,6 +168,8 @@ def main():
     setup_global_logger(run_name + "_prepare")
 
     data_cfg = cfg["data"]
+    dask_root = cfg.get("dask", {})
+
     base_pred_store, base_targ_store = _zarr_paths(data_cfg)
 
     if not base_pred_store or not base_targ_store:
@@ -179,12 +187,13 @@ def main():
     # Strip optional ".zarr" suffix
     pred_root = pred_base[:-5] if pred_base.endswith(".zarr") else pred_base
     targ_root = targ_base[:-5] if targ_base.endswith(".zarr") else targ_base
-
-    client = build_cluster()
+    
+    client = build_cluster(dask_root)
 
     try:
+        # default / legacy: per-year Zarrs
         years = list(year_range_from_cfg(data_cfg))
-        logger.info(f"Preparing per-year Zarr for years: {years}")
+        logger.info(f"prepare_zarr running in YEAR-WISE mode for years: {years}")
         logger.info(f"Base predictors dir: {pred_dir}, root: {pred_root}")
         logger.info(f"Base targets    dir: {targ_dir}, root: {targ_root}")
 
@@ -194,7 +203,6 @@ def main():
             logger.info(f"Year {y}: predictors store → {year_pred_store}")
             logger.info(f"Year {y}: targets    store → {year_targ_store}")
 
-            # soft reset: clear scheduler state + restart workers
             logger.info(f"Restarting Dask cluster before processing year {y}...")
             client.restart()
 
