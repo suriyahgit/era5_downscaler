@@ -1,22 +1,27 @@
 run_name: "unet_emo1_alps"
 seed: 42
 
+dask:
+  num_workers: 8
+  threads_per_worker: 1
+  memory_limit: "12GB"
+
 data:
   spatial:
-    west: 9    #3
-    east: 13   #18
-    south: 44  #42
-    north: 48  #50
+    west: 3    #3
+    east: 18    #18
+    south: 42  #42
+    north: 50  #50
 
   temporal:
-    start: "2015-01-01"
+    start: "2000-01-01"
     end: "2020-12-31"
 
   bands:
     era5: ["t2m", "ssrd", "tp"]
     pressure: ["t_850"]
     dem: ["dem"]
-    emo1: ["ta24"]
+    emo1: ["ta24", "pr", "rg"]
 
   stac_urls:
     ERA5_T2M_SSRD_TP: "https://stac.intertwin.fedcloud.eu/collections/ERA5_T2M_SSRD_TP"
@@ -35,16 +40,16 @@ data:
     val_years:   [2019, 2019]
     test_years:  [2020, 2020]
 
-  write_chunk_time: 1
-  write_chunk_lat: 128
-  write_chunk_lon: 128
+  write_chunk_time: 365
+  write_chunk_lat: 1
+  write_chunk_lon: 1
 
-  predictors_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/features_cnn"
-  targets_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v2/targets_cnn"
+  predictors_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v3/gridcell_features"
+  targets_feature_dir: "/mnt/CEPH_PROJECTS/InterTwin/Climate_Downscaling/PAPER/v3/gridcell_targets"
 
   # new flags
-  use_cached_zarr: true
-  write_cached_zarr: false 
+  use_cached_zarr: false
+  write_cached_zarr: true 
 
   predictors_zarr_name: "predictors.zarr"
   targets_zarr_name: "targets.zarr"
