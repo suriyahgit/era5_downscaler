@@ -23,7 +23,6 @@ TARGET_CHUNKS = {
     "lon": 32,
 }
 
-
 def start_cluster():
     cluster = LocalCluster(
         n_workers=4,
@@ -39,6 +38,19 @@ def start_cluster():
         "distributed.scheduler.work-stealing": True,
     })
     return client
+
+def clean_problematic_vars(ds: xr.Dataset) -> xr.Dataset:
+    # 1) Drop any object dtype variables (likely the VLenUTF8 offenders)
+    obj_vars = [name for name, da in ds.variables.items() if da.dtype == "O"]
+    if obj_vars:
+        print("[clean] Dropping object/string variables:", obj_vars)
+        ds = ds.drop_vars(obj_vars)
+
+    # 2) Completely reset encodings so we don't carry weird codecs forward
+    for v in ds.variables:
+        ds[v].encoding = {}
+
+    return ds
 
 
 def open_years(base_dir, prefix):
@@ -62,12 +74,11 @@ def open_years(base_dir, prefix):
 def rechunk_and_write(ds, out_path):
     print(f"\nRechunking and writing → {out_path}")
 
+    # Clean up encodings + string/object vars first
+    ds = clean_problematic_vars(ds)
+
     # ensure uniform existing chunks
     ds = ds.unify_chunks()
-
-    # drop any encoding["chunks"] metadata
-    for v in ds.variables:
-        ds[v].encoding.pop("chunks", None)
 
     # apply new chunking
     ds = ds.chunk(TARGET_CHUNKS)
@@ -83,16 +94,19 @@ def rechunk_and_write(ds, out_path):
     print("Done:", out_path)
 
 
-def main():
-    start_cluster()
 
-    print("\n=== Processing Predictors ===")
-    pred = open_years(FEAT_DIR, "predictors")
-    rechunk_and_write(pred, FEAT_OUT)
+def main():
+    client = start_cluster()
+
+    #print("\n=== Processing Predictors ===")
+    #pred = open_years(FEAT_DIR, "predictors")
+    #rechunk_and_write(pred, FEAT_OUT)
 
     print("\n=== Processing Targets ===")
     targ = open_years(TARG_DIR, "targets")
     rechunk_and_write(targ, TARG_OUT)
+
+    client.close()
 
 
 if __name__ == "__main__":
